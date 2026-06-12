@@ -3,6 +3,8 @@ name = "tmux-manager"
 version = "0.1.0"
 description = "Interactive terminal UI for managing tmux sessions"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
 requires-python = ">=3.11"
 dependencies = ["textual>=1.0"]
 

@@ -36,6 +36,17 @@ macOS and Linux are supported (anywhere tmux runs).
 
 ## Quick Start
 
+### Install with Homebrew (recommended)
+
+```bash
+brew install cloudnutzer/tap/tm
+```
+
+This installs the `tm` command and its man page (`man tm`). Then jump to
+[Your first 60 seconds](#your-first-60-seconds).
+
+### Install from source
+
 ```bash
 # 1. Get the code
 git clone https://github.com/cloudnutzer/tm.git
