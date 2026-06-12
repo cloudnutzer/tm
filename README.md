@@ -60,6 +60,10 @@ That's it. You'll see all running tmux sessions (or an empty state if none
 exist — press `n` to create your first one). Move with `j`/`k` or the arrow
 keys and hit `Enter` to jump into a session.
 
+`tm --help` prints usage and all key bindings, `tm --version` the version.
+A man page ships in `docs/tm.1` — view it with `man ./docs/tm.1`, or install
+it with `cp docs/tm.1 /usr/local/share/man/man1/`.
+
 > **Tip:** the install is *editable* — if you pull or edit the code, the
 > `tm` command picks up changes immediately, no reinstall needed.
 

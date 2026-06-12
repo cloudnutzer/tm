@@ -1,0 +1,147 @@
+.TH TM 1 "2026-06-12" "tm 0.1.0" "User Commands"
+.SH NAME
+tm \- interactive terminal UI for managing tmux sessions
+.SH SYNOPSIS
+.B tm
+.RB [ \-\-help ]
+.RB [ \-\-version ]
+.SH DESCRIPTION
+.B tm
+replaces the usual
+.B tmux ls
+\(->
+.B tmux attach\fR/\fBtmux new
+workflow with a keyboard-driven session manager. It lists all tmux sessions
+with window count, attached status, last activity and working directory,
+shows a live preview of the highlighted session's active pane, and lets you
+attach, create, kill, rename and detach sessions with single keystrokes.
+.PP
+.B tm
+detects where it runs: outside tmux, selecting a session attaches to it;
+inside tmux (when
+.B $TMUX
+is set), it switches the current client instead. If no tmux server is
+running, an empty state is shown and creating a session starts the server.
+.SH OPTIONS
+.TP
+.B \-\-help
+Show usage and key bindings, then exit.
+.TP
+.B \-\-version
+Print the version, then exit.
+.SH KEY BINDINGS
+.SS Session list
+.TP
+.BR j / k ", arrow keys"
+Move the cursor.
+.TP
+.B Enter
+Attach to the selected session (outside tmux) or switch the current client
+to it (inside tmux).
+.TP
+.B n
+Create a new session; prompts for a name and an optional start directory.
+.TP
+.B d
+Kill the selected session, after confirmation. An extra warning is shown
+when killing the session you are currently inside.
+.TP
+.B r
+Rename the selected session.
+.TP
+.B D
+Detach all clients from the selected session.
+.TP
+.B p
+Open the project sessionizer (see below).
+.TP
+.B /
+Filter the session list while typing.
+.B Escape
+clears the filter,
+.B Enter
+jumps to the highlighted match.
+.TP
+.BR q ", " Escape
+Quit.
+.SS Project sessionizer
+Lists the subdirectories of the configured project roots (default:
+.IR ~/git\-projects ).
+Selecting a project creates a session named after the directory, started in
+that directory \(em or attaches to it if it already exists (marked with a
+bullet). Characters that tmux forbids in session names
+.RB ( . " and " : )
+are replaced with underscores.
+.SS Dialogs
+.TP
+.BR y / n
+Confirm or decline kill and detach confirmations.
+.TP
+.B Escape
+Cancel any dialog.
+.SH CONFIGURATION
+Optional configuration is read from
+.I $XDG_CONFIG_HOME/tmux-manager/config.toml
+(default:
+.IR ~/.config/tmux-manager/config.toml ).
+All keys are optional; the defaults are:
+.PP
+.nf
+.RS
+[projects]
+roots = ["~/git-projects"]
+
+[sessions]
+default_dir = "~"
+
+[ui]
+list_refresh_seconds = 2.0
+preview_refresh_seconds = 2.0
+.RE
+.fi
+.TP
+.B projects.roots
+Directories whose subdirectories appear in the sessionizer.
+.TP
+.B sessions.default_dir
+Pre-filled start directory for new sessions.
+.TP
+.BR ui.list_refresh_seconds ", " ui.preview_refresh_seconds
+Refresh intervals for the session list and the preview pane, in seconds.
+.SH ENVIRONMENT
+.TP
+.B TMUX
+When set,
+.B tm
+assumes it runs inside tmux and switches clients instead of attaching.
+.TP
+.B TM_SOCKET
+Route all tmux commands to an isolated server
+.RB ( "tmux \-L <socket>" ).
+Mainly useful for testing
+.B tm
+without touching your real sessions.
+.SH FILES
+.TP
+.I ~/.config/tmux-manager/config.toml
+Optional configuration file.
+.SH EXAMPLES
+Open the manager:
+.PP
+.RS
+$ tm
+.RE
+.PP
+Bind a key in
+.I ~/.tmux.conf
+to open
+.B tm
+as a floating popup over the current session:
+.PP
+.RS
+bind S display-popup \-E \-w 80% \-h 75% tm
+.RE
+.SH SEE ALSO
+.BR tmux (1)
+.SH AUTHOR
+Eugen Hinz (https://github.com/cloudnutzer/tm)
