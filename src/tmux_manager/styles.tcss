@@ -1,0 +1,71 @@
+#filter {
+    display: none;
+}
+
+#main {
+    height: 1fr;
+}
+
+#sessions {
+    width: 60%;
+}
+
+#preview {
+    width: 40%;
+    border: round $accent;
+    padding: 0 1;
+    overflow-x: hidden;
+    overflow-y: hidden;
+}
+
+#empty {
+    display: none;
+    height: 1fr;
+    content-align: center middle;
+    color: $text-muted;
+}
+
+#sessionizer-hint {
+    padding: 0 1;
+    color: $text-muted;
+}
+
+ConfirmModal, NewSessionModal, RenameModal {
+    align: center middle;
+}
+
+.modal-box {
+    width: 60;
+    max-width: 90%;
+    height: auto;
+    padding: 1 2;
+    border: thick $accent;
+    background: $surface;
+}
+
+.modal-title {
+    text-style: bold;
+    margin-bottom: 1;
+}
+
+.modal-message {
+    margin-bottom: 1;
+}
+
+.modal-error {
+    color: $error;
+    height: auto;
+}
+
+.modal-box Input {
+    margin-bottom: 1;
+}
+
+.modal-buttons {
+    height: auto;
+    align-horizontal: right;
+}
+
+.modal-buttons Button {
+    margin-left: 2;
+}
