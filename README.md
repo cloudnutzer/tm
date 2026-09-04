@@ -7,15 +7,17 @@ clients, watch a live preview of what's running in each session, and jump
 into project directories via a built-in sessionizer.
 
 ```
-┌─ tmux manager ───────────────────────────────────────────────┐
-│ Name        Win  Att  Activity  Path        │ Preview         │
-│ ▶ work       3    ●     now     ~/work      │ $ npm run dev   │
-│   dotfiles   1          2h      ~/.dotfiles │ > server        │
-│   scratch    2          5d      ~           │   listening on  │
-│                                             │   :3000 ...     │
-├──────────────────────────────────────────────────────────────┤
-│ n new  d delete  r rename  D detach  p projects  / filter  q │
-└──────────────────────────────────────────────────────────────┘
+┌─ tmux manager ──────────────── 3 sessions · by name · inside tmux ─┐
+│ Name        Windows  Clients  Activity  Path      ╭─ work  node ──╮ │
+│ ▸ work         3        1       now     ~/work/api│ > server      │ │
+│   dotfiles     1                2h      ~/.dotfil…│   listening   │ │
+│   scratch      2                5d      ~         │   on :3000    │ │
+│                                                   │ $             │ │
+│                                                   ╰───────────────╯ │
+├─────────────────────────────────────────────────────────────────────┤
+│ n new  d delete  r rename  D detach  p projects  / filter  s sort   │
+│ v preview  ? help  q quit                                           │
+└─────────────────────────────────────────────────────────────────────┘
 ```
 
 Built with [Textual](https://textual.textualize.io/). Works inside and
@@ -105,6 +107,9 @@ it with `cp docs/tm.1 /usr/local/share/man/man1/`.
 | `D` | detach all clients from the selected session — handy when a session is "attached" on another terminal |
 | `p` | open the project sessionizer |
 | `/` | filter the session list as you type (`Esc` clears, `Enter` jumps to the match) |
+| `s` | toggle sorting between name and last activity |
+| `v` | show / hide the preview pane |
+| `?` | show the key help |
 | `q` / `Esc` | quit |
 
 ### Project sessionizer (`p`)
@@ -113,6 +118,7 @@ it with `cp docs/tm.1 /usr/local/share/man/man1/`.
 |---|---|
 | `j` / `k` / `↓` / `↑` | move the cursor |
 | `Enter` | create a session for the project (or attach if it already exists, marked `●`) |
+| `?` | show the key help |
 | `Esc` / `q` | back to the session list |
 
 ### Dialogs
@@ -127,13 +133,21 @@ it with `cp docs/tm.1 /usr/local/share/man/man1/`.
 
 ### Session overview with live preview
 
-The table shows every session with its window count, an `●` attached
-indicator, relative last-activity time (`now`, `3m`, `2h`, `5d`) and its
-working directory. Both the list and the preview refresh every 2 seconds,
-so sessions created or killed from other terminals appear automatically.
-The preview renders the actual terminal content (including colors) of the
-highlighted session's active pane — you can see whether a dev server is
-still running before you attach.
+The table shows every session with its window count, the number of attached
+clients, the relative last-activity time (`now`, `3m`, `2h`, `5d`) and the
+current working directory of its active pane. Inside tmux the session you
+are in is marked with `▸`. The header tells you how many sessions exist,
+how the list is sorted (`s` toggles name / activity) and whether `tm` runs
+inside or outside tmux.
+
+Both the list and the preview refresh every 2 seconds, so sessions created
+or killed from other terminals appear automatically. The preview renders
+the *bottom* of the highlighted session's active pane (including colors),
+titled with the session name and the foreground command — you can see
+whether a dev server is still running before you attach. It hides itself
+below 80 columns so the table stays readable in small popups; `v` toggles
+it by hand. tmux calls run in the background, so holding `j` never stalls
+the UI.
 
 ### Attach vs. switch
 
@@ -165,8 +179,12 @@ creates duplicates. Hidden directories (starting with `.`) are skipped.
   accidentally matches `work-2`.
 - Destructive actions (kill, detach) always ask first. Killing the session
   you're currently inside shows an extra warning.
+- New and renamed sessions are checked for duplicates inside the dialog, so
+  you never see a raw tmux error after the fact.
 - If no tmux server is running, `tm` shows an empty state instead of an
   error — `n` and `p` still work and start the server for you.
+- A broken config file or a missing `tmux` binary is reported with a clear
+  message before the UI starts (exit code 2 for config errors).
 
 ## Configuration
 
@@ -185,9 +203,15 @@ roots = ["~/git-projects"]
 default_dir = "~"
 
 [ui]
-# Refresh intervals in seconds.
+# Refresh intervals in seconds (minimum 0.2).
 list_refresh_seconds = 2.0
 preview_refresh_seconds = 2.0
+# Preview pane: shown at start, and its width in percent of the terminal.
+# It is always hidden below 80 columns; v toggles it at runtime.
+show_preview = true
+preview_width = 40
+# Initial sort order: "name" or "activity" (most recent first); s toggles.
+sort = "name"
 ```
 
 Example with several project roots:
@@ -218,7 +242,12 @@ popup — a very fast way to hop between sessions without leaving tmux.
 - **My session is named `my_project` instead of `my.project`** — tmux
   forbids `.` and `:` in session names; `tm` replaces them with `_`.
 - **The preview is empty** — the session's active pane may simply have a
-  blank screen; the preview shows exactly what `tmux capture-pane` returns.
+  blank screen; the preview shows the last non-blank lines of what
+  `tmux capture-pane` returns.
+- **The preview is missing** — the terminal is narrower than 80 columns,
+  or it was switched off (`v`, or `show_preview = false` in the config).
+- **`tm: config error: …`** — the config file has a typo or a wrong type;
+  the message names the key. Fix it or delete the file to get the defaults.
 
 ## Development
 
@@ -250,16 +279,20 @@ Two design decisions worth knowing before hacking on it:
    environment variable routes every tmux call to an isolated server
    (`tmux -L <socket>`) so tests never touch your real sessions.
 
-### Running the tests
+### Running the checks
 
 ```bash
 .venv/bin/pip install -e '.[dev]'
+.venv/bin/ruff check . && .venv/bin/ruff format --check .
+.venv/bin/mypy
 .venv/bin/pytest
 ```
 
-This covers the tmux wrapper (argv construction, output parsing, error
-handling) and the TUI itself via Textual's headless test pilot (navigation,
-attach/switch results, filtering, empty state).
+The same three steps run in GitHub Actions on Python 3.11–3.14. The tests
+cover the tmux wrapper (argv construction, output parsing, error handling),
+config validation, and the TUI itself via Textual's headless test pilot
+(navigation, attach/switch results, filtering, sorting, preview, dialogs,
+sessionizer) — all against a fake tmux, so no server is needed.
 
 ### Manual end-to-end testing
 

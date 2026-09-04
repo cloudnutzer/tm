@@ -10,6 +10,7 @@ from .screens.sessions import SessionsScreen
 class TmuxManagerApp(App[PostAction]):
     TITLE = "tmux manager"
     CSS_PATH = "styles.tcss"
+    ENABLE_COMMAND_PALETTE = False
 
     def __init__(self, config: Config) -> None:
         super().__init__()

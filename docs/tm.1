@@ -12,9 +12,11 @@ replaces the usual
 \(->
 .B tmux attach\fR/\fBtmux new
 workflow with a keyboard-driven session manager. It lists all tmux sessions
-with window count, attached status, last activity and working directory,
-shows a live preview of the highlighted session's active pane, and lets you
-attach, create, kill, rename and detach sessions with single keystrokes.
+with window count, number of attached clients, last activity and the
+working directory of the active pane, shows a live preview of the bottom of
+the highlighted session's active pane, and lets you attach, create, kill,
+rename and detach sessions with single keystrokes. Inside tmux the current
+session is marked with a triangle.
 .PP
 .B tm
 detects where it runs: outside tmux, selecting a session attaches to it;
@@ -62,6 +64,16 @@ clears the filter,
 .B Enter
 jumps to the highlighted match.
 .TP
+.B s
+Toggle sorting between session name and last activity.
+.TP
+.B v
+Show or hide the preview pane. The preview is always hidden when the
+terminal is narrower than 80 columns.
+.TP
+.B ?
+Show the key help.
+.TP
 .BR q ", " Escape
 Quit.
 .SS Project sessionizer
@@ -97,6 +109,9 @@ default_dir = "~"
 [ui]
 list_refresh_seconds = 2.0
 preview_refresh_seconds = 2.0
+show_preview = true
+preview_width = 40
+sort = "name"
 .RE
 .fi
 .TP
@@ -107,7 +122,27 @@ Directories whose subdirectories appear in the sessionizer.
 Pre-filled start directory for new sessions.
 .TP
 .BR ui.list_refresh_seconds ", " ui.preview_refresh_seconds
-Refresh intervals for the session list and the preview pane, in seconds.
+Refresh intervals for the session list and the preview pane, in seconds
+(minimum 0.2).
+.TP
+.B ui.show_preview
+Whether the preview pane is shown at start (default: true).
+.TP
+.B ui.preview_width
+Width of the preview pane in percent of the terminal width (10\-90,
+default: 40).
+.TP
+.B ui.sort
+Initial sort order of the session list:
+.B name
+or
+.B activity
+(most recent first).
+.PP
+A config file that cannot be parsed, or a key with the wrong type or an
+out-of-range value, is reported with the offending key and
+.B tm
+exits with status 2.
 .SH ENVIRONMENT
 .TP
 .B TMUX
@@ -121,6 +156,16 @@ Route all tmux commands to an isolated server
 Mainly useful for testing
 .B tm
 without touching your real sessions.
+.SH EXIT STATUS
+.TP
+.B 0
+Success, including quitting the UI without selecting a session.
+.TP
+.B 1
+tmux is not installed, or a tmux command failed.
+.TP
+.B 2
+The configuration file is invalid.
 .SH FILES
 .TP
 .I ~/.config/tmux-manager/config.toml

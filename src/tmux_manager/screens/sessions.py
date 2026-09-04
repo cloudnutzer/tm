@@ -8,15 +8,16 @@ from textual import work
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
+from textual.events import Resize
 from textual.screen import Screen
 from textual.timer import Timer
 from textual.widgets import DataTable, Footer, Header, Input, Static
 
 from .. import tmux
-from ..config import Config
+from ..config import Config, SortMode
 from ..models import TmuxSession
 from ..util import relative_time, short_path
-from .modals import ConfirmModal, NewSessionModal, RenameModal
+from .modals import ConfirmModal, HelpModal, NewSessionModal, RenameModal
 from .sessionizer import SessionizerScreen
 
 if TYPE_CHECKING:
@@ -24,8 +25,27 @@ if TYPE_CHECKING:
 
 # Cursor movements within this window only trigger one capture-pane call.
 PREVIEW_DEBOUNCE_SECONDS = 0.08
+# Below this terminal width the preview is hidden so the table stays usable.
+MIN_WIDTH_FOR_PREVIEW = 80
+CURRENT_MARKER = "▸"
 
-Row = tuple[str, str, str, str, str]
+Cell = str | Text
+Row = tuple[Cell, Cell, Cell, Cell, Cell]
+
+HELP = [
+    ("j / k, ↓ / ↑", "move the cursor"),
+    ("Enter", "attach (outside tmux) / switch client (inside tmux)"),
+    ("n", "new session"),
+    ("d", "kill session (asks first)"),
+    ("r", "rename session"),
+    ("D", "detach all clients from session"),
+    ("p", "project sessionizer"),
+    ("/", "filter sessions; Esc clears, Enter jumps to the match"),
+    ("s", "sort by name / last activity"),
+    ("v", "show / hide the preview"),
+    ("?", "this help"),
+    ("q, Esc", "quit"),
+]
 
 
 class SessionsScreen(Screen[None]):
@@ -38,6 +58,9 @@ class SessionsScreen(Screen[None]):
         Binding("D", "detach_clients", "detach"),
         Binding("p", "sessionizer", "projects"),
         Binding("/", "filter", "filter"),
+        Binding("s", "toggle_sort", "sort"),
+        Binding("v", "toggle_preview", "preview"),
+        Binding("question_mark", "help", "help"),
         Binding("escape", "escape", "close", show=False),
         Binding("q", "app.quit", "quit"),
     ]
@@ -45,9 +68,14 @@ class SessionsScreen(Screen[None]):
     def __init__(self) -> None:
         super().__init__()
         self._sessions: list[TmuxSession] = []
+        self._current: str | None = None
         self._filter = ""
+        self._sort: SortMode = "name"
+        self._show_preview = True
         self._last_rows: list[Row] | None = None
-        self._last_preview: str | None = None
+        self._preview_name: str | None = None
+        self._preview_raw = ""
+        self._last_preview: tuple[str, int, str] | None = None
         self._last_error: str | None = None
         self._list_timer: Timer | None = None
         self._preview_timer: Timer | None = None
@@ -63,10 +91,14 @@ class SessionsScreen(Screen[None]):
         with Horizontal(id="main"):
             yield DataTable(id="sessions")
             yield Static(id="preview")
-        yield Static("No tmux sessions — press n to create one or p to pick a project", id="empty")
+        yield Static(id="empty")
         yield Footer()
 
     def on_mount(self) -> None:
+        self._sort = self.cfg.sort
+        self._show_preview = self.cfg.show_preview
+        self.query_one("#preview").styles.width = f"{self.cfg.preview_width}%"
+        self._apply_preview_visibility()
         table = self.query_one(DataTable)
         table.cursor_type = "row"
         table.add_columns("Name", "Windows", "Clients", "Activity", "Path")
@@ -91,6 +123,10 @@ class SessionsScreen(Screen[None]):
         self._preview_timer.resume()
         self.refresh_sessions()
 
+    def on_resize(self, event: Resize) -> None:
+        self._apply_preview_visibility()
+        self._render_preview()
+
     # ------------------------------------------------------------- listing
 
     def refresh_sessions(self) -> None:
@@ -98,13 +134,17 @@ class SessionsScreen(Screen[None]):
 
     @work(exclusive=True, group="sessions")
     async def _load_sessions(self) -> None:
+        def load() -> tuple[list[TmuxSession], str | None]:
+            return tmux.list_sessions(), tmux.current_session()
+
         try:
-            sessions = await asyncio.to_thread(tmux.list_sessions)
+            sessions, current = await asyncio.to_thread(load)
         except tmux.TmuxError as error:
             self._report_error(str(error))
             return
         self._last_error = None
         self._sessions = sessions
+        self._current = current
         self._render_table()
 
     def _report_error(self, message: str) -> None:
@@ -114,15 +154,23 @@ class SessionsScreen(Screen[None]):
             self.notify(message, severity="error")
 
     def _visible_sessions(self) -> list[TmuxSession]:
-        if not self._filter:
-            return self._sessions
-        needle = self._filter.lower()
-        return [s for s in self._sessions if needle in s.name.lower()]
+        sessions = self._sessions
+        if self._filter:
+            needle = self._filter.lower()
+            sessions = [s for s in sessions if needle in s.name.lower()]
+        if self._sort == "activity":
+            return sorted(sessions, key=lambda s: s.activity, reverse=True)
+        return sorted(sessions, key=lambda s: s.name.lower())
 
-    @staticmethod
-    def _row(session: TmuxSession) -> Row:
+    def _row(self, session: TmuxSession) -> Row:
+        if self._current is None:
+            name: Cell = session.name
+        elif session.name == self._current:
+            name = Text(f"{CURRENT_MARKER} {session.name}", style="bold")
+        else:
+            name = f"  {session.name}"
         return (
-            session.name,
+            name,
             str(session.windows),
             str(session.attached) if session.attached else "",
             relative_time(session.activity),
@@ -132,7 +180,7 @@ class SessionsScreen(Screen[None]):
     def _render_table(self) -> None:
         visible = self._visible_sessions()
         rows = [self._row(s) for s in visible]
-        self._set_empty(not self._sessions)
+        self._update_status(visible)
         if rows == self._last_rows:
             return
         self._last_rows = rows
@@ -147,9 +195,20 @@ class SessionsScreen(Screen[None]):
                 table.move_cursor(row=names.index(current))
         self._schedule_preview()
 
-    def _set_empty(self, empty: bool) -> None:
-        self.query_one("#main").display = not empty
-        self.query_one("#empty").display = empty
+    def _update_status(self, visible: list[TmuxSession]) -> None:
+        count = len(self._sessions)
+        where = "inside tmux" if self._current is not None else "outside tmux"
+        self.sub_title = f"{count} session{'s' if count != 1 else ''} · by {self._sort} · {where}"
+        if not self._sessions:
+            message = "No tmux sessions — press n to create one or p to pick a project"
+        elif not visible:
+            message = f"No sessions match '{self._filter}'"
+        else:
+            message = ""
+        empty = self.query_one("#empty", Static)
+        empty.update(message)
+        empty.display = bool(message)
+        self.query_one("#main").display = not message
 
     def _cursor_session_name(self) -> str | None:
         table = self.query_one(DataTable)
@@ -158,7 +217,21 @@ class SessionsScreen(Screen[None]):
         row_key, _ = table.coordinate_to_cell_key(table.cursor_coordinate)
         return row_key.value
 
+    def _session(self, name: str) -> TmuxSession | None:
+        return next((s for s in self._sessions if s.name == name), None)
+
     # ------------------------------------------------------------- preview
+
+    def _preview_visible(self) -> bool:
+        return self._show_preview and self.size.width >= MIN_WIDTH_FOR_PREVIEW
+
+    def _apply_preview_visibility(self) -> None:
+        preview = self.query_one("#preview")
+        visible = self._preview_visible()
+        if preview.display != visible:
+            preview.display = visible
+            if visible:
+                self._schedule_preview()
 
     def update_preview(self) -> None:
         self._load_preview()
@@ -170,9 +243,11 @@ class SessionsScreen(Screen[None]):
 
     @work(exclusive=True, group="preview")
     async def _load_preview(self) -> None:
+        if not self._preview_visible():
+            return
         name = self._cursor_session_name()
         if name is None:
-            self._set_preview("")
+            self._set_preview(None, "")
             return
         try:
             content = await asyncio.to_thread(tmux.capture_pane, name)
@@ -180,13 +255,27 @@ class SessionsScreen(Screen[None]):
             content = ""
         if name != self._cursor_session_name():
             return  # the cursor moved on while tmux was busy
-        self._set_preview(content)
+        self._set_preview(name, content)
 
-    def _set_preview(self, content: str) -> None:
-        if content == self._last_preview:
+    def _set_preview(self, name: str | None, content: str) -> None:
+        self._preview_name = name
+        self._preview_raw = content
+        self._render_preview()
+
+    def _render_preview(self) -> None:
+        preview = self.query_one("#preview", Static)
+        height = preview.content_size.height
+        title = ""
+        if self._preview_name is not None:
+            session = self._session(self._preview_name)
+            command = f"  {session.command}" if session and session.command else ""
+            title = f"{self._preview_name}{command}"
+        key = (self._preview_raw, height, title)
+        if key == self._last_preview:
             return
-        self._last_preview = content
-        self.query_one("#preview", Static).update(Text.from_ansi(content))
+        self._last_preview = key
+        preview.border_title = title
+        preview.update(tail_of_pane(self._preview_raw, height))
 
     def on_data_table_row_highlighted(self, event: DataTable.RowHighlighted) -> None:
         self._schedule_preview()
@@ -223,7 +312,7 @@ class SessionsScreen(Screen[None]):
         if name is None:
             return
         message = f"Kill session '{name}'?"
-        if name == tmux.current_session():
+        if name == self._current:
             message += "\n\nYou are currently inside this session!"
         confirmed = await self.app.push_screen_wait(ConfirmModal(message))
         if not confirmed:
@@ -269,6 +358,21 @@ class SessionsScreen(Screen[None]):
     def action_sessionizer(self) -> None:
         self.app.push_screen(SessionizerScreen())
 
+    def action_help(self) -> None:
+        self.app.push_screen(HelpModal("Session list", HELP))
+
+    def action_toggle_sort(self) -> None:
+        self._sort = "activity" if self._sort == "name" else "name"
+        self._render_table()
+
+    def action_toggle_preview(self) -> None:
+        self._show_preview = not self._show_preview
+        self._apply_preview_visibility()
+        if self._show_preview and self.size.width < MIN_WIDTH_FOR_PREVIEW:
+            self.notify(
+                f"Preview needs at least {MIN_WIDTH_FOR_PREVIEW} columns", severity="warning"
+            )
+
     def action_cursor_down(self) -> None:
         self.query_one(DataTable).action_cursor_down()
 
@@ -298,3 +402,19 @@ class SessionsScreen(Screen[None]):
             self.query_one(DataTable).focus()
         else:
             self.app.exit(None)
+
+
+def tail_of_pane(content: str, height: int) -> Text:
+    """The last ``height`` non-blank lines of a captured pane, colors intact.
+
+    capture-pane returns the full pane height including the blank rows below
+    the prompt; showing the top would hide the most recent output.
+    """
+    lines: list[Text] = list(Text.from_ansi(content).split("\n"))
+    for line in lines:
+        line.rstrip()
+    while lines and not lines[-1].plain.strip():
+        lines.pop()
+    if height > 0:
+        lines = lines[-height:]
+    return Text("\n").join(lines)

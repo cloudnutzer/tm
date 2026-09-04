@@ -19,6 +19,9 @@ keys:
   D               detach all clients from session
   p               project sessionizer
   /               filter session list
+  s               sort by name / last activity
+  v               show / hide the preview
+  ?               key help
   q, escape       quit
 
 configuration:

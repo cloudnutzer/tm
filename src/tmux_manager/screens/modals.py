@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+from collections.abc import Sequence
 from pathlib import Path
 
+from rich.table import Table
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical
@@ -40,6 +42,44 @@ class ConfirmModal(ModalScreen[bool]):
         self.dismiss(False)
 
 
+class HelpModal(ModalScreen[None]):
+    BINDINGS = [
+        Binding("escape", "close", "close"),
+        Binding("q", "close", "close", show=False),
+        Binding("question_mark", "close", "close", show=False),
+    ]
+
+    def __init__(self, title: str, rows: Sequence[tuple[str, str]]) -> None:
+        super().__init__()
+        self._title = title
+        self._rows = rows
+
+    def compose(self) -> ComposeResult:
+        table = Table.grid(padding=(0, 2))
+        table.add_column(style="bold")
+        table.add_column()
+        for key, description in self._rows:
+            table.add_row(key, description)
+        with Vertical(classes="modal-box"):
+            yield Label(f"Keys — {self._title}", classes="modal-title")
+            yield Static(table)
+            yield Label("Esc closes", classes="modal-hint")
+
+    def action_close(self) -> None:
+        self.dismiss(None)
+
+
+def _validate_name(raw: str, *, current: str | None = None) -> tuple[str | None, str]:
+    """Sanitized name and an empty error, or None and the error to show."""
+    try:
+        name = tmux.sanitize_session_name(raw)
+    except ValueError:
+        return None, "Please enter a session name."
+    if name != current and tmux.has_session(name):
+        return None, f"Session '{name}' already exists."
+    return name, ""
+
+
 class NewSessionModal(ModalScreen[NewSessionRequest | None]):
     BINDINGS = [Binding("escape", "cancel", "cancel", show=False)]
 
@@ -51,7 +91,7 @@ class NewSessionModal(ModalScreen[NewSessionRequest | None]):
         with Vertical(classes="modal-box"):
             yield Label("New session", classes="modal-title")
             yield Input(placeholder="session name", id="name")
-            yield Input(placeholder=f"start directory (default: {self._default_dir})", id="dir")
+            yield Input(value=self._default_dir, placeholder="start directory", id="dir")
             yield Static("", id="error", classes="modal-error")
             with Horizontal(classes="modal-buttons"):
                 yield Button("Create", variant="primary", id="create")
@@ -71,10 +111,9 @@ class NewSessionModal(ModalScreen[NewSessionRequest | None]):
 
     def _submit(self) -> None:
         error = self.query_one("#error", Static)
-        try:
-            name = tmux.sanitize_session_name(self.query_one("#name", Input).value)
-        except ValueError:
-            error.update("Please enter a session name.")
+        name, problem = _validate_name(self.query_one("#name", Input).value)
+        if name is None:
+            error.update(problem)
             return
         raw_dir = self.query_one("#dir", Input).value.strip() or self._default_dir
         start_dir = Path(raw_dir).expanduser()
@@ -116,10 +155,9 @@ class RenameModal(ModalScreen[str | None]):
             self.dismiss(None)
 
     def _submit(self) -> None:
-        try:
-            name = tmux.sanitize_session_name(self.query_one("#name", Input).value)
-        except ValueError:
-            self.query_one("#error", Static).update("Please enter a session name.")
+        name, problem = _validate_name(self.query_one("#name", Input).value, current=self._current)
+        if name is None:
+            self.query_one("#error", Static).update(problem)
             return
         self.dismiss(name)
 

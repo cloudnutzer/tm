@@ -12,9 +12,17 @@ from textual.widgets.option_list import Option
 from .. import tmux
 from ..config import Config
 from ..util import short_path
+from .modals import HelpModal
 
 if TYPE_CHECKING:
     from ..app import TmuxManagerApp
+
+HELP = [
+    ("j / k, ↓ / ↑", "move the cursor"),
+    ("Enter", "create the project's session, or attach if it exists (●)"),
+    ("?", "this help"),
+    ("q, Esc", "back to the session list"),
+]
 
 
 class SessionizerScreen(Screen[None]):
@@ -23,6 +31,7 @@ class SessionizerScreen(Screen[None]):
         Binding("q", "back", "back", show=False),
         Binding("j", "cursor_down", "down", show=False),
         Binding("k", "cursor_up", "up", show=False),
+        Binding("question_mark", "help", "help"),
     ]
 
     def __init__(self) -> None:
@@ -77,6 +86,9 @@ class SessionizerScreen(Screen[None]):
 
     def action_back(self) -> None:
         self.app.pop_screen()
+
+    def action_help(self) -> None:
+        self.app.push_screen(HelpModal("Project sessionizer", HELP))
 
     def action_cursor_down(self) -> None:
         self.query_one(OptionList).action_cursor_down()
