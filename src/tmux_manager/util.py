@@ -9,7 +9,7 @@ def short_path(path: str) -> str:
     if path == home:
         return "~"
     if path.startswith(home + "/"):
-        return "~" + path[len(home):]
+        return "~" + path[len(home) :]
     return path
 
 

@@ -2,11 +2,11 @@ from __future__ import annotations
 
 import argparse
 import os
+import shutil
 import sys
 
 from . import __version__, tmux
-from .app import TmuxManagerApp
-from .config import load_config
+from .config import Config, ConfigError, load_config
 from .models import PostAction
 
 EPILOG = """\
@@ -35,24 +35,45 @@ def build_parser() -> argparse.ArgumentParser:
         epilog=EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
-    parser.add_argument(
-        "--version", action="version", version=f"%(prog)s {__version__}"
-    )
+    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     return parser
 
 
-def main() -> None:
-    build_parser().parse_args()
-    app = TmuxManagerApp(config=load_config())
-    result: PostAction | None = app.run()
-    if result is None:
-        return
-    if result.kind == "attach":
-        # exec only after Textual has fully restored the terminal
-        argv = tmux.base_argv() + ["attach-session", "-t", f"={result.target}"]
+def fail(message: str, code: int = 1) -> None:
+    print(f"tm: {message}", file=sys.stderr)
+    sys.exit(code)
+
+
+def run_tui(config: Config) -> PostAction | None:
+    # Imported lazily: Textual takes a noticeable moment to import and is
+    # only needed when the interactive UI actually runs.
+    from .app import TmuxManagerApp
+
+    result: PostAction | None = TmuxManagerApp(config=config).run()
+    return result
+
+
+def perform(action: PostAction) -> None:
+    """Attach or switch after the terminal has been restored."""
+    if action.kind == "attach":
+        # exec so tm leaves no extra process behind
+        argv = tmux.base_argv() + ["attach-session", "-t", f"={action.target}"]
         os.execvp(argv[0], argv)
     else:
         try:
-            tmux.switch_client(result.target)
+            tmux.switch_client(action.target)
         except tmux.TmuxError as error:
-            sys.exit(f"tm: {error}")
+            fail(str(error))
+
+
+def main(argv: list[str] | None = None) -> None:
+    build_parser().parse_args(argv)
+    if shutil.which("tmux") is None:
+        fail("tmux not found on PATH")
+    try:
+        config = load_config()
+    except ConfigError as error:
+        fail(f"config error: {error}", code=2)
+    result = run_tui(config)
+    if result is not None:
+        perform(result)

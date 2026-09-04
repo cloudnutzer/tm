@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import TYPE_CHECKING, cast
 
 from textual.app import ComposeResult
 from textual.binding import Binding
@@ -9,17 +10,28 @@ from textual.widgets import Footer, Header, OptionList, Static
 from textual.widgets.option_list import Option
 
 from .. import tmux
-from ..models import PostAction
+from ..config import Config
 from ..util import short_path
 
+if TYPE_CHECKING:
+    from ..app import TmuxManagerApp
 
-class SessionizerScreen(Screen):
+
+class SessionizerScreen(Screen[None]):
     BINDINGS = [
         Binding("escape", "back", "back"),
         Binding("q", "back", "back", show=False),
         Binding("j", "cursor_down", "down", show=False),
         Binding("k", "cursor_up", "up", show=False),
     ]
+
+    def __init__(self) -> None:
+        super().__init__()
+        self._projects: dict[str, Path] = {}
+
+    @property
+    def cfg(self) -> Config:
+        return cast("TmuxManagerApp", self.app).cfg
 
     def compose(self) -> ComposeResult:
         yield Header()
@@ -30,9 +42,9 @@ class SessionizerScreen(Screen):
         yield Footer()
 
     def on_mount(self) -> None:
-        self._projects = discover_projects(self.app.cfg.project_roots)
+        self._projects = discover_projects(self.cfg.project_roots)
         if not self._projects:
-            roots = ", ".join(str(r) for r in self.app.cfg.project_roots)
+            roots = ", ".join(str(r) for r in self.cfg.project_roots)
             self.query_one("#sessionizer-hint", Static).update(
                 f"No project directories found in: {roots}"
             )
@@ -44,7 +56,9 @@ class SessionizerScreen(Screen):
         option_list = self.query_one(OptionList)
         for name, directory in self._projects.items():
             marker = "● " if name in existing else "  "
-            option_list.add_option(Option(f"{marker}{name}  ({short_path(str(directory))})", id=name))
+            option_list.add_option(
+                Option(f"{marker}{name}  ({short_path(str(directory))})", id=name)
+            )
         option_list.highlighted = 0
         option_list.focus()
 
@@ -59,8 +73,7 @@ class SessionizerScreen(Screen):
         except tmux.TmuxError as error:
             self.notify(str(error), severity="error")
             return
-        kind = "switch" if tmux.inside_tmux() else "attach"
-        self.app.exit(PostAction(kind=kind, target=name))
+        self.app.exit(tmux.attach_action(name))
 
     def action_back(self) -> None:
         self.app.pop_screen()

@@ -9,9 +9,15 @@ class TmuxSession:
     name: str
     windows: int
     attached: int
+    """Number of clients currently attached."""
     activity: int
+    """Epoch seconds of the last activity in the session."""
     path: str
-    created: int
+    """Directory the session was started in."""
+    current_path: str
+    """Working directory of the active pane."""
+    command: str
+    """Foreground command of the active pane."""
 
 
 @dataclass(frozen=True)

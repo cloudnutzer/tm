@@ -12,7 +12,7 @@ from __future__ import annotations
 import os
 import subprocess
 
-from .models import TmuxSession
+from .models import PostAction, TmuxSession
 
 # \x1f (ASCII unit separator) cannot appear in session names or paths,
 # so splitting on it is unambiguous.
@@ -23,7 +23,8 @@ LIST_FORMAT = "\x1f".join(
         "#{session_attached}",
         "#{session_activity}",
         "#{session_path}",
-        "#{session_created}",
+        "#{pane_current_path}",
+        "#{pane_current_command}",
     )
 )
 
@@ -43,7 +44,10 @@ def base_argv() -> list[str]:
 
 
 def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
-    return subprocess.run(base_argv() + args, capture_output=True, text=True, check=False)
+    try:
+        return subprocess.run(base_argv() + args, capture_output=True, text=True, check=False)
+    except FileNotFoundError as error:
+        raise TmuxError("tmux not found on PATH") from error
 
 
 def _run_or_raise(args: list[str]) -> str:
@@ -58,11 +62,19 @@ def inside_tmux() -> bool:
 
 
 def sanitize_session_name(raw: str) -> str:
-    # tmux forbids "." and ":" in session names (they are target separators)
+    # tmux forbids "." and ":" in session names (they are target separators),
+    # and a leading "-" would be parsed as a command flag.
     name = raw.strip().replace(".", "_").replace(":", "_")
+    if name.startswith("-"):
+        name = "_" + name[1:]
     if not name:
         raise ValueError("session name is empty")
     return name
+
+
+def attach_action(name: str) -> PostAction:
+    """Switch the current client when inside tmux, otherwise attach."""
+    return PostAction(kind="switch" if inside_tmux() else "attach", target=name)
 
 
 def list_sessions() -> list[TmuxSession]:
@@ -76,7 +88,7 @@ def list_sessions() -> list[TmuxSession]:
     for line in result.stdout.splitlines():
         if not line:
             continue
-        name, windows, attached, activity, path, created = line.split("\x1f")
+        name, windows, attached, activity, path, current_path, command = line.split("\x1f")
         sessions.append(
             TmuxSession(
                 name=name,
@@ -84,7 +96,8 @@ def list_sessions() -> list[TmuxSession]:
                 attached=int(attached),
                 activity=int(activity),
                 path=path,
-                created=int(created),
+                current_path=current_path,
+                command=command,
             )
         )
     return sessions
