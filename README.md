@@ -4,7 +4,8 @@ An interactive terminal UI for managing tmux sessions. One command — `tm` —
 replaces the usual `tmux ls` → `tmux attach`/`tmux new` dance with a
 keyboard-driven session overview: attach, create, kill, rename, detach
 clients, watch a live preview of what's running in each session, and jump
-into project directories via a built-in sessionizer.
+into project directories via a built-in sessionizer. For the quick path,
+`tm NAME` and `tm .` attach directly without opening the UI.
 
 ```
 ┌─ tmux manager ──────────────── 3 sessions · by name · inside tmux ─┐
@@ -116,10 +117,11 @@ it with `cp docs/tm.1 /usr/local/share/man/man1/`.
 
 | Key | Action |
 |---|---|
-| `j` / `k` / `↓` / `↑` | move the cursor |
+| any text | fuzzy-filter the projects (best match first) |
+| `↓` / `↑`, `ctrl+n` / `ctrl+p` | move the cursor |
 | `Enter` | create a session for the project (or attach if it already exists, marked `●`) |
 | `?` | show the key help |
-| `Esc` / `q` | back to the session list |
+| `Esc` | clear the filter; press again to go back to the session list |
 
 ### Dialogs
 
@@ -161,7 +163,8 @@ the UI.
 ### Project sessionizer
 
 Press `p` to list the subdirectories of your configured project roots
-(default: `~/git-projects`). Selecting a project:
+(default: `~/git-projects`). Start typing to fuzzy-filter the list — `tmm`
+finds `tmux-manager` — and hit `Enter` on the best match. Selecting a project:
 
 1. derives a session name from the directory name (tmux-illegal characters
    `.` and `:` become `_`),
@@ -219,6 +222,25 @@ Example with several project roots:
 ```toml
 [projects]
 roots = ["~/git-projects", "~/work/repos", "/srv/projects"]
+```
+
+## Scripting: `tm` without the UI
+
+| Command | Effect |
+|---|---|
+| `tm NAME` | attach to (or switch to) session `NAME`; creates it in `sessions.default_dir` if missing |
+| `tm DIR` | same for the project in directory `DIR`, named after the directory and started there. `DIR` must contain a `/` or be `.`, `..` or start with `~` — so `tm .` opens a session for the current directory |
+| `tm ls` | list sessions (name, windows, clients, activity, path); a header row is printed only on a terminal |
+| `tm ls --json` | the same as JSON, for scripts |
+| `tm kill NAME` | kill session `NAME` |
+
+Session names are sanitized the same way as in the UI (`.` and `:` become
+`_`). Exit status is 0 on success, 1 for tmux errors or a missing
+directory, 2 for a broken config file.
+
+```bash
+alias t='tm .'                      # one session per project directory
+tm ls --json | jq -r '.[].name'     # feed session names into other tools
 ```
 
 ## Optional: open `tm` as a tmux popup
@@ -323,5 +345,4 @@ Not implemented yet, collected during planning:
 - Bulk cleanup: kill all detached sessions older than X
 - Toggle back to the previous session with one key
 - Git branch / dirty status per project in the sessionizer; zoxide as an additional project source
-- Non-interactive subcommands for scripting (`tm new foo`, `tm kill foo`, `tm ls --json`)
 - Activity/bell indicators and the foreground process per session in the list

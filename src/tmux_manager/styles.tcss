@@ -84,3 +84,7 @@ HelpModal .modal-box {
 .modal-buttons Button {
     margin-left: 2;
 }
+
+#project-filter {
+    margin: 0 1;
+}

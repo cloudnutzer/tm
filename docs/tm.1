@@ -5,6 +5,15 @@ tm \- interactive terminal UI for managing tmux sessions
 .B tm
 .RB [ \-\-help ]
 .RB [ \-\-version ]
+.br
+.B tm
+.IR NAME \ |\  DIR
+.br
+.B tm ls
+.RB [ \-\-json ]
+.br
+.B tm kill
+.I NAME
 .SH DESCRIPTION
 .B tm
 replaces the usual
@@ -24,6 +33,13 @@ inside tmux (when
 .B $TMUX
 is set), it switches the current client instead. If no tmux server is
 running, an empty state is shown and creating a session starts the server.
+.PP
+Given a
+.I NAME
+or
+.IR DIR ,
+.B tm
+skips the UI and attaches directly, creating the session first if needed.
 .SH OPTIONS
 .TP
 .B \-\-help
@@ -31,6 +47,37 @@ Show usage and key bindings, then exit.
 .TP
 .B \-\-version
 Print the version, then exit.
+.SH COMMANDS
+.TP
+.BI "tm " NAME
+Attach to (or, inside tmux, switch to) session
+.IR NAME .
+If it does not exist it is created in
+.BR sessions.default_dir .
+.TP
+.BI "tm " DIR
+The same for the project in directory
+.IR DIR :
+the session is named after the directory and started there.
+.I DIR
+must contain a slash or be
+.BR . ", " ..
+or start with
+.BR ~ ,
+so
+.B tm .
+opens a session for the current directory.
+.TP
+.BR "tm ls" " [" \-\-json ]
+List sessions with window count, attached clients, last activity and the
+active pane's working directory. A header row is only printed when standard
+output is a terminal;
+.B \-\-json
+prints a JSON array for scripts.
+.TP
+.BI "tm kill " NAME
+Kill session
+.IR NAME .
 .SH KEY BINDINGS
 .SS Session list
 .TP
@@ -79,6 +126,13 @@ Quit.
 .SS Project sessionizer
 Lists the subdirectories of the configured project roots (default:
 .IR ~/git\-projects ).
+Typing fuzzy-filters the list, best match first;
+.B Enter
+selects the highlighted project, arrow keys or
+.BR ctrl+n / ctrl+p
+move the cursor, and
+.B Escape
+clears the filter or, when it is empty, returns to the session list.
 Selecting a project creates a session named after the directory, started in
 that directory \(em or attaches to it if it already exists (marked with a
 bullet). Characters that tmux forbids in session names
@@ -175,6 +229,18 @@ Open the manager:
 .PP
 .RS
 $ tm
+.RE
+.PP
+Open a session for the current directory, or jump back into it:
+.PP
+.RS
+$ tm .
+.RE
+.PP
+Feed session names into another tool:
+.PP
+.RS
+$ tm ls \-\-json | jq \-r '.[].name'
 .RE
 .PP
 Bind a key in
