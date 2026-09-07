@@ -124,3 +124,35 @@ def test_tm_socket_routes_to_isolated_server(monkeypatch: pytest.MonkeyPatch) ->
     assert tmux.base_argv() == ["tmux", "-L", "tmtest"]
     monkeypatch.delenv("TM_SOCKET")
     assert tmux.base_argv() == ["tmux"]
+
+
+LIST_KEYS = """\
+bind-key    -T prefix       C-z                  suspend-client
+bind-key    -T prefix       S                    display-popup -E -w 80% -h 75% tm
+bind-key    -T prefix       T                    display-popup -E tmux-other-tool
+"""
+
+
+def test_popup_binding_finds_key(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake, calls = fake_run(stdout=LIST_KEYS)
+    monkeypatch.setattr(tmux, "_run", fake)
+    assert tmux.popup_binding() == "S"
+    assert calls == [["list-keys", "-T", "prefix"]]
+
+
+def test_popup_binding_ignores_other_popups_and_missing_server(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    fake, _ = fake_run(stdout=LIST_KEYS.splitlines()[2] + "\n")
+    monkeypatch.setattr(tmux, "_run", fake)
+    assert tmux.popup_binding() is None
+    fake, _ = fake_run(stderr="no server running on /tmp/tmux-501/default", returncode=1)
+    monkeypatch.setattr(tmux, "_run", fake)
+    assert tmux.popup_binding() is None
+
+
+def test_popup_binding_with_note_and_full_path(monkeypatch: pytest.MonkeyPatch) -> None:
+    line = 'bind-key -N "Session picker" -T prefix M-s display-popup -E /usr/local/bin/tm\n'
+    fake, _ = fake_run(stdout=line)
+    monkeypatch.setattr(tmux, "_run", fake)
+    assert tmux.popup_binding() == "M-s"

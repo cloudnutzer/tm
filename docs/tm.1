@@ -31,8 +31,13 @@ session is marked with a triangle.
 detects where it runs: outside tmux, selecting a session attaches to it;
 inside tmux (when
 .B $TMUX
-is set), it switches the current client instead. If no tmux server is
-running, an empty state is shown and creating a session starts the server.
+is set), it switches the current client instead, so there is no need to
+detach before changing sessions: run
+.B tm
+from any pane, or bind it to a popup key (see EXAMPLES). A hint line above
+the footer names the popup key when one is bound, and shows the binding to
+add otherwise. If no tmux server is running, an empty state is shown and
+creating a session starts the server.
 .PP
 Given a
 .I NAME

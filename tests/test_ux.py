@@ -189,3 +189,49 @@ async def test_rename_rejects_existing_name_but_allows_own(fake_tmux: FakeTmux) 
 def test_text_marker_rows_compare_equal() -> None:
     # _render_table relies on row equality to skip rebuilds
     assert Text("▸ x", style="bold") == Text("▸ x", style="bold")
+
+
+def hint(app: TmuxManagerApp) -> str:
+    return str(app.screen.query_one("#hint", Static).visual)
+
+
+def test_switch_hint_variants() -> None:
+    from tmux_manager.screens.sessions import switch_hint
+
+    assert "prefix S opens" in switch_hint(inside=True, popup_key="S")
+    assert "add to ~/.tmux.conf: bind S" in switch_hint(inside=True, popup_key=None)
+    assert "prefix M-s opens" in switch_hint(inside=False, popup_key="M-s")
+    assert "run tm again" in switch_hint(inside=False, popup_key=None)
+    for inside in (True, False):
+        for key in ("S", None):
+            assert "no need to detach" in switch_hint(inside=inside, popup_key=key)
+
+
+async def test_hint_names_popup_key_inside_tmux(fake_tmux: FakeTmux) -> None:
+    fake_tmux.inside = True
+    fake_tmux.current = "alpha"
+    fake_tmux.popup_key = "S"
+    app = TmuxManagerApp(config=Config())
+    async with app.run_test() as pilot:
+        await settle(pilot)
+        assert app.screen.query_one("#hint").display
+        assert "Enter switches" in hint(app)
+        assert "prefix S opens this picker" in hint(app)
+
+
+async def test_hint_suggests_binding_when_missing(fake_tmux: FakeTmux) -> None:
+    app = TmuxManagerApp(config=Config())
+    async with app.run_test() as pilot:
+        await settle(pilot)
+        assert "run tm again" in hint(app)
+        assert "bind S display-popup" in hint(app)
+
+
+async def test_hint_stays_visible_in_empty_state(fake_tmux: FakeTmux) -> None:
+    fake_tmux.sessions = []
+    app = TmuxManagerApp(config=Config())
+    async with app.run_test() as pilot:
+        await settle(pilot)
+        assert app.screen.query_one("#empty").display
+        assert app.screen.query_one("#hint").display
+        assert "no need to detach" in hint(app)

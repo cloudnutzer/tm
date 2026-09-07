@@ -35,6 +35,7 @@ class FakeTmux:
         self.calls: list[tuple[str, ...]] = []
         self.inside = False
         self.current: str | None = None
+        self.popup_key: str | None = None
 
     def list_sessions(self) -> list[TmuxSession]:
         return list(self.sessions)
@@ -71,4 +72,5 @@ def fake_tmux(monkeypatch: pytest.MonkeyPatch) -> FakeTmux:
     monkeypatch.setattr(tmux, "detach_clients", fake.detach_clients)
     monkeypatch.setattr(tmux, "inside_tmux", lambda: fake.inside)
     monkeypatch.setattr(tmux, "current_session", lambda: fake.current)
+    monkeypatch.setattr(tmux, "popup_binding", lambda: fake.popup_key)
     return fake

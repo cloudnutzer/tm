@@ -28,6 +28,7 @@ PREVIEW_DEBOUNCE_SECONDS = 0.08
 # Below this terminal width the preview is hidden so the table stays usable.
 MIN_WIDTH_FOR_PREVIEW = 80
 CURRENT_MARKER = "▸"
+POPUP_BINDING_EXAMPLE = "bind S display-popup -E -w 80% -h 75% tm"
 
 Cell = str | Text
 Row = tuple[Cell, Cell, Cell, Cell, Cell]
@@ -69,6 +70,9 @@ class SessionsScreen(Screen[None]):
         super().__init__()
         self._sessions: list[TmuxSession] = []
         self._current: str | None = None
+        self._inside = False
+        self._popup_key: str | None = None
+        self._popup_checked = False
         self._filter = ""
         self._sort: SortMode = "name"
         self._show_preview = True
@@ -92,6 +96,7 @@ class SessionsScreen(Screen[None]):
             yield DataTable(id="sessions")
             yield Static(id="preview")
         yield Static(id="empty")
+        yield Static(id="hint")
         yield Footer()
 
     def on_mount(self) -> None:
@@ -134,17 +139,24 @@ class SessionsScreen(Screen[None]):
 
     @work(exclusive=True, group="sessions")
     async def _load_sessions(self) -> None:
-        def load() -> tuple[list[TmuxSession], str | None]:
-            return tmux.list_sessions(), tmux.current_session()
+        check_popup = not self._popup_checked
+
+        def load() -> tuple[list[TmuxSession], str | None, str | None]:
+            sessions = tmux.list_sessions()
+            popup = tmux.popup_binding() if check_popup else self._popup_key
+            return sessions, tmux.current_session(), popup
 
         try:
-            sessions, current = await asyncio.to_thread(load)
+            sessions, current, popup = await asyncio.to_thread(load)
         except tmux.TmuxError as error:
             self._report_error(str(error))
             return
         self._last_error = None
         self._sessions = sessions
+        self._inside = tmux.inside_tmux()
         self._current = current
+        self._popup_key = popup
+        self._popup_checked = True
         self._render_table()
 
     def _report_error(self, message: str) -> None:
@@ -197,7 +209,7 @@ class SessionsScreen(Screen[None]):
 
     def _update_status(self, visible: list[TmuxSession]) -> None:
         count = len(self._sessions)
-        where = "inside tmux" if self._current is not None else "outside tmux"
+        where = "inside tmux" if self._inside else "outside tmux"
         self.sub_title = f"{count} session{'s' if count != 1 else ''} · by {self._sort} · {where}"
         if not self._sessions:
             message = "No tmux sessions — press n to create one or p to pick a project"
@@ -209,6 +221,9 @@ class SessionsScreen(Screen[None]):
         empty.update(message)
         empty.display = bool(message)
         self.query_one("#main").display = not message
+        self.query_one("#hint", Static).update(
+            Text(switch_hint(inside=self._inside, popup_key=self._popup_key))
+        )
 
     def _cursor_session_name(self) -> str | None:
         table = self.query_one(DataTable)
@@ -402,6 +417,24 @@ class SessionsScreen(Screen[None]):
             self.query_one(DataTable).focus()
         else:
             self.app.exit(None)
+
+
+def switch_hint(*, inside: bool, popup_key: str | None) -> str:
+    """One line explaining how to switch sessions without detaching."""
+    if inside:
+        base = "Enter switches to the highlighted session — no need to detach."
+        if popup_key:
+            return f"{base} From any session, prefix {popup_key} opens this picker."
+        return f"{base} To open it from any session, add to ~/.tmux.conf: {POPUP_BINDING_EXAMPLE}"
+    if popup_key:
+        return (
+            f"Inside a session, prefix {popup_key} opens this picker — "
+            "Enter switches, no need to detach."
+        )
+    return (
+        "Inside a session, run tm again to switch — no need to detach. "
+        f"For a popup key, add to ~/.tmux.conf: {POPUP_BINDING_EXAMPLE}"
+    )
 
 
 def tail_of_pane(content: str, height: int) -> Text:

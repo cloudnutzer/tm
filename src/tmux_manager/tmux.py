@@ -10,6 +10,7 @@ Conventions:
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 
 from .models import PostAction, TmuxSession
@@ -29,6 +30,8 @@ LIST_FORMAT = "\x1f".join(
 )
 
 _NO_SERVER_MARKERS = ("no server running", "error connecting to")
+# e.g. "bind-key -T prefix S display-popup -E -w 80% -h 75% tm"
+_POPUP_BINDING = re.compile(r"-T prefix\s+(\S+)\s+display-popup\b.*\btm\b")
 
 
 class TmuxError(RuntimeError):
@@ -134,6 +137,18 @@ def has_session(name: str) -> bool:
 
 def switch_client(name: str) -> None:
     _run_or_raise(["switch-client", "-t", f"={name}"])
+
+
+def popup_binding() -> str | None:
+    """The prefix key bound to a display-popup that runs tm, if any."""
+    result = _run(["list-keys", "-T", "prefix"])
+    if result.returncode != 0:
+        return None
+    for line in result.stdout.splitlines():
+        match = _POPUP_BINDING.search(line)
+        if match:
+            return match.group(1)
+    return None
 
 
 def current_session() -> str | None:

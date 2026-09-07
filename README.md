@@ -160,6 +160,14 @@ the UI.
 - **Inside tmux** (`$TMUX` set) → it issues `tmux switch-client`, so your
   current client jumps to the chosen session.
 
+**You never need to detach to change sessions.** From inside a session,
+run `tm` in any pane and press `Enter` on another session — your client
+switches there and `tm` closes. Even quicker is the popup binding described
+[below](#optional-open-tm-as-a-tmux-popup): `prefix S` opens `tm` over
+whatever you are doing. The hint line above the footer always tells you
+which of the two applies: it names the popup key if one is bound in your
+tmux, and shows the line to add to `~/.tmux.conf` otherwise.
+
 ### Project sessionizer
 
 Press `p` to list the subdirectories of your configured project roots
@@ -259,6 +267,9 @@ popup — a very fast way to hop between sessions without leaving tmux.
 
 - **`tm: command not found`** — `~/.local/bin` is not on your `PATH`, or
   the symlink is missing. Re-run steps 3–4 of the Quick Start.
+- **How do I switch sessions while I'm inside one?** — don't detach; run
+  `tm` again (or press the popup key, see the hint line at the bottom) and
+  hit `Enter` on the target. See [Attach vs. switch](#attach-vs-switch).
 - **A session refuses to attach ("session is attached elsewhere")** — select
   it and press `D` to detach the other client first.
 - **My session is named `my_project` instead of `my.project`** — tmux
