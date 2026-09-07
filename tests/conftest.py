@@ -1,3 +1,5 @@
+from dataclasses import replace
+
 import pytest
 
 from tmux_manager import tmux
@@ -55,6 +57,7 @@ class FakeTmux:
 
     def rename_session(self, old: str, new: str) -> None:
         self.calls.append(("rename", old, new))
+        self.sessions = [replace(s, name=new) if s.name == old else s for s in self.sessions]
 
     def detach_clients(self, name: str) -> None:
         self.calls.append(("detach", name))

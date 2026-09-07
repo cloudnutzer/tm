@@ -15,6 +15,7 @@ from .. import tmux
 from ..config import Config
 from ..util import short_path
 from .modals import HelpModal
+from .widgets import FilterInput
 
 if TYPE_CHECKING:
     from ..app import TmuxManagerApp
@@ -51,7 +52,7 @@ class SessionizerScreen(Screen[None]):
             "Pick a project — type to filter, Enter creates or attaches its session",
             id="sessionizer-hint",
         )
-        yield Input(placeholder="filter projects…", id="project-filter")
+        yield FilterInput(placeholder="filter projects…", id="project-filter")
         yield OptionList(id="projects")
         yield Footer()
 
@@ -71,7 +72,13 @@ class SessionizerScreen(Screen[None]):
     def on_screen_resume(self) -> None:
         if self._projects:
             self._load_existing()
-            self._render_options()
+            self._render_options(keep_cursor=True)
+
+    def _highlighted_name(self) -> str | None:
+        option_list = self.query_one(OptionList)
+        if option_list.highlighted is None:
+            return None
+        return option_list.get_option_at_index(option_list.highlighted).id
 
     def _load_existing(self) -> None:
         try:
@@ -79,11 +86,16 @@ class SessionizerScreen(Screen[None]):
         except tmux.TmuxError:
             self._existing = set()
 
-    def _render_options(self) -> None:
+    def _render_options(self, *, keep_cursor: bool = False) -> None:
+        """Rebuild the list; a changed filter highlights the best match,
+        a rebuild for other reasons keeps the highlighted project."""
         option_list = self.query_one(OptionList)
         query = self.query_one(Input).value.strip()
+        previous = self._highlighted_name() if keep_cursor else None
+        names: list[str] = []
         option_list.clear_options()
         for name, directory in match_projects(self._projects, query):
+            names.append(name)
             marker = "● " if name in self._existing else "  "
             label = Matcher(query).highlight(name) if query else Content(name)
             option_list.add_option(
@@ -92,8 +104,8 @@ class SessionizerScreen(Screen[None]):
                     id=name,
                 )
             )
-        if option_list.option_count:
-            option_list.highlighted = 0
+        if names:
+            option_list.highlighted = names.index(previous) if previous in names else 0
 
     def on_input_changed(self, event: Input.Changed) -> None:
         self._render_options()

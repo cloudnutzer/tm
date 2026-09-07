@@ -19,6 +19,7 @@ from ..models import TmuxSession
 from ..util import relative_time, short_path
 from .modals import ConfirmModal, HelpModal, NewSessionModal, RenameModal
 from .sessionizer import SessionizerScreen
+from .widgets import FilterInput
 
 if TYPE_CHECKING:
     from ..app import TmuxManagerApp
@@ -61,7 +62,7 @@ class SessionsScreen(Screen[None]):
         Binding("/", "filter", "filter"),
         Binding("s", "toggle_sort", "sort"),
         Binding("v", "toggle_preview", "preview"),
-        Binding("question_mark", "help", "help"),
+        Binding("question_mark", "help", "help", priority=True),
         Binding("escape", "escape", "close", show=False),
         Binding("q", "app.quit", "quit"),
     ]
@@ -74,6 +75,7 @@ class SessionsScreen(Screen[None]):
         self._popup_key: str | None = None
         self._popup_checked = False
         self._filter = ""
+        self._cursor_target: str | None = None
         self._sort: SortMode = "name"
         self._show_preview = True
         self._last_rows: list[Row] | None = None
@@ -91,7 +93,7 @@ class SessionsScreen(Screen[None]):
 
     def compose(self) -> ComposeResult:
         yield Header()
-        yield Input(placeholder="filter sessions…", id="filter")
+        yield FilterInput(placeholder="filter sessions…", id="filter")
         with Horizontal(id="main"):
             yield DataTable(id="sessions")
             yield Static(id="preview")
@@ -197,14 +199,18 @@ class SessionsScreen(Screen[None]):
             return
         self._last_rows = rows
         table = self.query_one(DataTable)
-        current = self._cursor_session_name()
+        wanted = self._cursor_target or self._cursor_session_name()
+        previous_row = table.cursor_row
         table.clear()
         for session, row in zip(visible, rows, strict=True):
             table.add_row(*row, key=session.name)
-        if current is not None:
-            names = [s.name for s in visible]
-            if current in names:
-                table.move_cursor(row=names.index(current))
+        names = [s.name for s in visible]
+        if wanted in names:
+            table.move_cursor(row=names.index(wanted))
+            self._cursor_target = None
+        elif names:
+            # e.g. the highlighted session was killed: stay on the same row
+            table.move_cursor(row=min(previous_row, len(names) - 1))
         self._schedule_preview()
 
     def _update_status(self, visible: list[TmuxSession]) -> None:
@@ -346,9 +352,11 @@ class SessionsScreen(Screen[None]):
         new_name = await self.app.push_screen_wait(RenameModal(current=name))
         if not new_name or new_name == name:
             return
+        self._cursor_target = new_name  # follow the session to its new name
         try:
             tmux.rename_session(name, new_name)
         except tmux.TmuxError as error:
+            self._cursor_target = None
             self.notify(str(error), severity="error")
         self.refresh_sessions()
 

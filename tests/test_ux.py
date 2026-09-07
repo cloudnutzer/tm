@@ -1,9 +1,11 @@
 """Stage-2 UX behaviour: preview tail, markers, sort, preview toggle, help, validation."""
 
+from dataclasses import replace
+
 import pytest
 from rich.text import Text
 from textual.pilot import Pilot
-from textual.widgets import DataTable, Static
+from textual.widgets import DataTable, Input, Static
 
 from tmux_manager import tmux
 from tmux_manager.app import TmuxManagerApp
@@ -235,3 +237,57 @@ async def test_hint_stays_visible_in_empty_state(fake_tmux: FakeTmux) -> None:
         assert app.screen.query_one("#empty").display
         assert app.screen.query_one("#hint").display
         assert "no need to detach" in hint(app)
+
+
+def cursor_name(app: TmuxManagerApp) -> str | None:
+    return app.screen._cursor_session_name()  # type: ignore[attr-defined]
+
+
+async def test_cursor_follows_renamed_session(fake_tmux: FakeTmux) -> None:
+    app = TmuxManagerApp(config=Config())
+    async with app.run_test() as pilot:
+        await settle(pilot)
+        await pilot.press("j", "r")
+        await pilot.pause()
+        await pilot.press("ctrl+u", "z", "e", "t", "a", "enter")
+        await settle(pilot)
+        assert fake_tmux.calls == [("rename", "beta", "zeta")]
+        assert cursor_name(app) == "zeta"
+
+
+async def test_cursor_stays_on_row_after_kill(fake_tmux: FakeTmux) -> None:
+    fake_tmux.sessions.append(replace(fake_tmux.sessions[0], name="gamma"))
+    app = TmuxManagerApp(config=Config())
+    async with app.run_test() as pilot:
+        await settle(pilot)
+        await pilot.press("j")  # beta, the middle row
+        assert cursor_name(app) == "beta"
+        await pilot.press("d")
+        await pilot.pause()
+        await pilot.press("y")
+        await settle(pilot)
+        assert fake_tmux.calls == [("kill", "beta")]
+        assert cursor_name(app) == "gamma"  # same row, not back to the top
+
+
+async def test_cursor_kept_when_last_row_killed(fake_tmux: FakeTmux) -> None:
+    app = TmuxManagerApp(config=Config())
+    async with app.run_test() as pilot:
+        await settle(pilot)
+        await pilot.press("j", "d")
+        await pilot.pause()
+        await pilot.press("y")
+        await settle(pilot)
+        assert cursor_name(app) == "alpha"
+
+
+async def test_help_opens_while_session_filter_focused(fake_tmux: FakeTmux) -> None:
+    app = TmuxManagerApp(config=Config())
+    async with app.run_test() as pilot:
+        await settle(pilot)
+        await pilot.press("/", "a", "question_mark")
+        await pilot.pause()
+        assert isinstance(app.screen, HelpModal)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.screen.query_one("#filter", Input).value == "a"

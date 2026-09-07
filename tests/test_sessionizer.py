@@ -5,6 +5,7 @@ from textual.widgets import Input, OptionList
 from tmux_manager.app import TmuxManagerApp
 from tmux_manager.config import Config
 from tmux_manager.models import PostAction
+from tmux_manager.screens.modals import HelpModal
 from tmux_manager.screens.sessionizer import discover_projects, match_projects
 
 from .conftest import FakeTmux
@@ -125,3 +126,38 @@ async def test_sessionizer_escape_returns_to_list(fake_tmux: FakeTmux, tmp_path:
         await pilot.press("escape")
         await pilot.pause()
         assert app.screen.query("#sessions")
+
+
+async def test_sessionizer_keeps_highlight_after_help(fake_tmux: FakeTmux, tmp_path: Path) -> None:
+    for name in ("alpha", "beta", "gamma"):
+        (tmp_path / name).mkdir()
+    app = TmuxManagerApp(config=Config(project_roots=(tmp_path,)))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("p")
+        await pilot.pause()
+        await pilot.press("down", "down")
+        assert app.screen.query_one(OptionList).highlighted == 2
+        await pilot.press("question_mark")
+        await pilot.pause()
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.screen.query_one(OptionList).highlighted == 2
+        await pilot.press("b", "e")  # a changed filter highlights the best match again
+        assert names_shown(app) == ["beta"]
+        assert app.screen.query_one(OptionList).highlighted == 0
+
+
+async def test_sessionizer_help_opens_while_typing(fake_tmux: FakeTmux, tmp_path: Path) -> None:
+    (tmp_path / "alpha").mkdir()
+    app = TmuxManagerApp(config=Config(project_roots=(tmp_path,)))
+    async with app.run_test() as pilot:
+        await pilot.pause()
+        await pilot.press("p")
+        await pilot.pause()
+        await pilot.press("a", "question_mark")
+        await pilot.pause()
+        assert isinstance(app.screen, HelpModal)
+        await pilot.press("escape")
+        await pilot.pause()
+        assert app.screen.query_one(Input).value == "a"  # the ? was not typed
