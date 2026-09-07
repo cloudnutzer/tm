@@ -31,7 +31,7 @@ switches the current client.
 
 | Dependency | Version | Notes |
 |---|---|---|
-| tmux | any recent version (tested with 3.6a) | must be on `PATH` |
+| tmux | any recent version (tested with 3.7c) | must be on `PATH` |
 | Python | ≥ 3.11 | uses stdlib `tomllib` |
 | Textual | ≥ 1.0 | installed automatically |
 
