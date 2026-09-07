@@ -153,6 +153,8 @@ class SessionsScreen(Screen[None]):
         except tmux.TmuxError as error:
             self._report_error(str(error))
             return
+        if not self._ui_alive():
+            return
         self._last_error = None
         self._sessions = sessions
         self._inside = tmux.inside_tmux()
@@ -161,9 +163,17 @@ class SessionsScreen(Screen[None]):
         self._popup_checked = True
         self._render_table()
 
+    def _ui_alive(self) -> bool:
+        """False once the screen is being torn down.
+
+        A worker can return from its tmux thread after app.exit() has already
+        removed the widgets; touching them then would raise NoMatches.
+        """
+        return self.is_attached and bool(self.query(DataTable))
+
     def _report_error(self, message: str) -> None:
         # A persistent failure must not raise a notification every tick.
-        if message != self._last_error:
+        if message != self._last_error and self._ui_alive():
             self._last_error = message
             self.notify(message, severity="error")
 
@@ -274,8 +284,8 @@ class SessionsScreen(Screen[None]):
             content = await asyncio.to_thread(tmux.capture_pane, name)
         except tmux.TmuxError:
             content = ""
-        if name != self._cursor_session_name():
-            return  # the cursor moved on while tmux was busy
+        if not self._ui_alive() or name != self._cursor_session_name():
+            return  # the screen went away, or the cursor moved on meanwhile
         self._set_preview(name, content)
 
     def _set_preview(self, name: str | None, content: str) -> None:
