@@ -239,8 +239,12 @@ roots = ["~/git-projects", "~/work/repos", "/srv/projects"]
 | `tm NAME` | attach to (or switch to) session `NAME`; creates it in `sessions.default_dir` if missing |
 | `tm DIR` | same for the project in directory `DIR`, named after the directory and started there. `DIR` must contain a `/` or be `.`, `..` or start with `~` — so `tm .` opens a session for the current directory |
 | `tm ls` | list sessions (name, windows, clients, activity, path); a header row is printed only on a terminal |
-| `tm ls --json` | the same as JSON, for scripts |
+| `tm ls --json` | the same as JSON, for scripts; each session has an `agents` array (see `tm agents --json`) |
 | `tm kill NAME` | kill session `NAME` |
+| `tm agents` | list the coding agents in all panes: state, agent, `session:window.pane`, pane id, time since the last change, path |
+| `tm agents --json` | the same as JSON: `session`, `window`, `window_name`, `pane`, `pane_id`, `agent`, `state`, `path`, `title`, `seconds_since_change` |
+| `tm status` | one line for the tmux status bar, e.g. `🔴1 🟢2 ⚪1`; prints nothing when no agent runs |
+| `tm status --ascii` | the same with letters (`B1 W2 I1`) for terminals without emoji |
 
 Session names are sanitized the same way as in the UI (`.` and `:` become
 `_`). Exit status is 0 on success, 1 for tmux errors or a missing
@@ -249,7 +253,22 @@ directory, 2 for a broken config file.
 ```bash
 alias t='tm .'                      # one session per project directory
 tm ls --json | jq -r '.[].name'     # feed session names into other tools
+tm agents --json | jq -r '.[] | select(.state == "blocked") | .pane_id'
 ```
+
+`tm agents`, `tm status` and `tm ls --json` look at each agent pane twice,
+0.7 seconds apart, to see whether it is still changing, so they take about a
+second when agents are running (and no extra time when none are).
+
+### Agent status in the tmux status bar
+
+```tmux
+set -g status-interval 5
+set -g status-right '#(tm status) %H:%M'
+```
+
+The status bar then shows e.g. `🔴1 🟢2` next to the clock, and nothing when
+no agent runs. Use `tm status --ascii` if your terminal font lacks the emoji.
 
 ## Optional: open `tm` as a tmux popup
 
