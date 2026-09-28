@@ -12,6 +12,7 @@ from __future__ import annotations
 import os
 import re
 import subprocess
+from dataclasses import replace
 
 from .models import PostAction, TmuxPane, TmuxSession
 
@@ -99,6 +100,11 @@ def sanitize_session_name(raw: str) -> str:
 def attach_action(name: str) -> PostAction:
     """Switch the current client when inside tmux, otherwise attach."""
     return PostAction(kind="switch" if inside_tmux() else "attach", target=name)
+
+
+def pane_action(pane: TmuxPane) -> PostAction:
+    """Like attach_action, but land in exactly this pane."""
+    return replace(attach_action(pane.session), pane=pane.pane_id)
 
 
 def list_sessions() -> list[TmuxSession]:
@@ -192,6 +198,12 @@ def capture_pane_by_id(pane_id: str, *, colors: bool = False) -> str:
 
 def has_session(name: str) -> bool:
     return _run(["has-session", "-t", f"={name}"]).returncode == 0
+
+
+def select_pane(pane_id: str) -> None:
+    """Make the pane the current one of its window, and its window current."""
+    _run_or_raise(["select-window", "-t", pane_id])
+    _run_or_raise(["select-pane", "-t", pane_id])
 
 
 def switch_client(name: str) -> None:

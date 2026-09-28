@@ -49,6 +49,9 @@ class PostAction:
 
     kind: Literal["attach", "switch"]
     target: str
+    """Session name."""
+    pane: str | None = None
+    """Pane id (``%12``) to select in the session first, e.g. an agent's pane."""
 
 
 @dataclass(frozen=True)
