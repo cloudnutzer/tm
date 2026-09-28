@@ -14,6 +14,12 @@ tm \- interactive terminal UI for managing tmux sessions
 .br
 .B tm kill
 .I NAME
+.br
+.B tm agents
+.RB [ \-\-json ]
+.br
+.B tm status
+.RB [ \-\-ascii ]
 .SH DESCRIPTION
 .B tm
 replaces the usual
@@ -45,6 +51,11 @@ or
 .IR DIR ,
 .B tm
 skips the UI and attaches directly, creating the session first if needed.
+.PP
+.B tm
+also shows which coding agents (Claude Code, Codex, OpenCode, Antigravity
+and others) run in which tmux pane, and whether each one is working, waiting
+for you, or idle; see AGENT STATUS.
 .SH OPTIONS
 .TP
 .B \-\-help
@@ -78,11 +89,42 @@ List sessions with window count, attached clients, last activity and the
 active pane's working directory. A header row is only printed when standard
 output is a terminal;
 .B \-\-json
-prints a JSON array for scripts.
+prints a JSON array for scripts, where every session also has an
+.B agents
+array with the objects described under
+.BR "tm agents" .
 .TP
 .BI "tm kill " NAME
 Kill session
 .IR NAME .
+.TP
+.BR "tm agents" " [" \-\-json ]
+List the coding agents in all panes, blocked ones first: state, agent,
+target
+.RI ( session : window . pane ),
+pane id, time since the pane last changed, and working directory.
+.B \-\-json
+prints an array of objects with the keys
+.BR session ", " window ", " window_name ", " pane ", " pane_id ", " agent ,
+.B state
+.RB ( blocked ", " working " or " idle ),
+.BR path ", " title
+and
+.BR seconds_since_change .
+.TP
+.BR "tm status" " [" \-\-ascii ]
+Print one short line for the tmux status bar: a red, green and white circle
+emoji, each followed by the number of blocked, working and idle agents
+(states without agents are left out); nothing when no agent runs.
+.B \-\-ascii
+uses letters instead
+.RB ( "B1 W2 I1" ).
+.PP
+.BR "tm agents" ", " "tm status"
+and
+.B tm ls \-\-json
+look at every agent pane twice, 0.7 seconds apart, to see whether it is
+changing; they take about a second when agents run.
 .SH KEY BINDINGS
 .SS Session list
 .TP
@@ -108,6 +150,9 @@ Detach all clients from the selected session.
 .TP
 .B p
 Open the project sessionizer (see below).
+.TP
+.B a
+Open the agents screen (see below).
 .TP
 .B /
 Filter the session list while typing.
@@ -143,6 +188,23 @@ that directory \(em or attaches to it if it already exists (marked with a
 bullet). Characters that tmux forbids in session names
 .RB ( . " and " : )
 are replaced with underscores.
+.SS Agents screen
+One row per pane that runs a coding agent: state, agent, session, window
+.RI ( window . pane
+when the window is split), working directory and time since the pane last
+changed, blocked agents first, then working, then idle. The preview shows
+the highlighted agent's pane.
+.B Enter
+selects that agent's window and pane and attaches or switches to it;
+.B /
+filters the list;
+.B Escape
+clears the filter or returns to the session list;
+.B ?
+shows the key help. The session list shows the same states rolled up per
+session in its
+.B Agents
+column.
 .SS Dialogs
 .TP
 .BR y / n
@@ -171,6 +233,9 @@ preview_refresh_seconds = 2.0
 show_preview = true
 preview_width = 40
 sort = "name"
+
+[agents]
+working_grace_seconds = 3.0
 .RE
 .fi
 .TP
@@ -197,11 +262,53 @@ Initial sort order of the session list:
 or
 .B activity
 (most recent first).
+.TP
+.B agents.working_grace_seconds
+An agent whose pane changed within this many seconds counts as working
+(minimum 0.5, default: 3).
 .PP
 A config file that cannot be parsed, or a key with the wrong type or an
 out-of-range value, is reported with the offending key and
 .B tm
 exits with status 2.
+.SH AGENT STATUS
+.B tm
+finds agents by reading the process table: it walks the processes below
+each pane and matches their names (and the script run by
+.BR node ", " bun " or " python )
+against the known agents. The command tmux reports for a pane is not
+enough; Claude Code, for example, shows up as its version number.
+Detected agents: Claude Code, Codex, OpenCode, Antigravity
+.RB ( agy ),
+Gemini, Cursor, Copilot, Amp, Cline, Devin, Droid, Grok, Hermes, Kilo, Kimi,
+Kiro, Letta, Maki, Muse, Pi, Qoder, Qwen, omp and Mastra Code.
+.PP
+Each agent pane is in one of three states:
+.TP
+.B blocked
+The agent waits for you: a permission prompt, a question, a trust dialog.
+.TP
+.B working
+The pane's text changed within
+.B agents.working_grace_seconds
+(for a window with a single pane, tmux's window activity counts too), or
+the screen shows a working indicator.
+.TP
+.B idle
+Anything else, usually waiting for the next prompt.
+.PP
+Two signals decide: activity works for every agent, even one
+.B tm
+has no rules for; screen rules decide
+.BR blocked .
+The screen rules are the agent manifests of herdr
+(https://github.com/herdrdev/herdr, Apache License 2.0), bundled unchanged
+and evaluated by a Python port of herdr's rule engine. An agent whose user
+interface changed, or one without a manifest, shows
+.B idle
+instead of
+.B blocked
+until the manifest knows the new prompt.
 .SH ENVIRONMENT
 .TP
 .B TMUX
@@ -246,6 +353,15 @@ Feed session names into another tool:
 .PP
 .RS
 $ tm ls \-\-json | jq \-r '.[].name'
+.RE
+.PP
+Show agent status next to the clock in the tmux status bar:
+.PP
+.RS
+.nf
+set \-g status\-interval 5
+set \-g status\-right '#(tm status) %H:%M'
+.fi
 .RE
 .PP
 Bind a key in

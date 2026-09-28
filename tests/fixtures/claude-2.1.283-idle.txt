@@ -1,0 +1,40 @@
+
+ ▐▛███▛█   Claude Code v2.1.283
+▝▜██████▀  Haiku 4.5 · Claude Max
+ ▝▝   ▝▝   /private/tmp/tma1-e2e
+
+  Get to finished work sooner with Opus 5.5. Switch anytime with /model.
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                     tmux detected · scroll with PgUp/PgDn · or add 'set -g mouse on' to ~/.tmux.conf for wheel scroll
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ Try "refactor <filepath>"
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  🧠                          --% Haiku 4.5 0k/200k
+  ● 5h:3% (16:00)  ● 7d:13% (17:00)  $0.00  +0 -0
+  tma1-e2e
+  ⏸ manual mode on · ← for agents

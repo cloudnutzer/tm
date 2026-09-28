@@ -1,5 +1,6 @@
 import subprocess
 from dataclasses import replace
+from pathlib import Path
 
 import pytest
 
@@ -205,6 +206,9 @@ def test_window_activity_of_a_shared_window_does_not_make_working() -> None:
     tracker = agents.AgentTracker(grace_seconds=3)
     status = tracker.observe(agent_pane(panes=2, activity=999), "static", now=1000)
     assert (status.state, status.last_change) == ("idle", 999)
+    # a busy neighbour keeps window_activity fresh; this pane stays unchanged
+    status = tracker.observe(agent_pane(panes=2, activity=1100), "static", now=1100)
+    assert (status.state, status.last_change) == ("idle", 1000)
 
 
 def test_blocked_screen_wins_over_activity() -> None:
@@ -290,3 +294,14 @@ def test_rollup() -> None:
     assert agents.rollup(statuses) == "🔴1 🟢2 ⚪1"
     assert agents.rollup(statuses, ascii=True) == "B1 W2 I1"
     assert agents.rollup([]) == ""
+
+
+def test_streaming_claude_is_working_although_its_screen_looks_idle() -> None:
+    fixture = Path(__file__).parent / "fixtures" / "claude-2.1.283-streaming.txt"
+    screen = fixture.read_text(encoding="utf-8")
+    tracker = agents.AgentTracker(grace_seconds=3)
+    p = agent_pane(title="✳ Tmux panes poem")
+    tracker.observe(p, screen, now=1000)
+    more = screen.replace("side by side,", "side by side,\n  Panes in panes, a quiet tide,")
+    assert tracker.observe(p, more, now=1002).state == "working"
+    assert tracker.observe(p, more, now=1006).state == "idle"

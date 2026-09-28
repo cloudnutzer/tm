@@ -1,0 +1,40 @@
+
+ ▐▛███▛█   Claude Code v2.1.283
+▝▜██████▀  Haiku 4.5 · Claude Max
+ ▝▝   ▝▝   /private/tmp/tma1-e2e
+
+  Get to finished work sooner with Opus 5.5. Switch anytime with /model.
+
+❯ Write a 16 line poem about tmux panes, no tools.
+
+⏺ Tmux Panes
+
+  Split the terminal, watch it divide,
+  Vertical borders standing side by side,
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯ 
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  🧠                          21% Haiku 4.5 41k/200k
+  ● 5h:3% (16:00)  ● 7d:13% (17:00)  $0.00  +0 -0
+  tma1-e2e  Tmux panes poem
+  ⏸ manual mode on · ← for agents

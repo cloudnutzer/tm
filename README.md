@@ -4,8 +4,10 @@ An interactive terminal UI for managing tmux sessions. One command — `tm` —
 replaces the usual `tmux ls` → `tmux attach`/`tmux new` dance with a
 keyboard-driven session overview: attach, create, kill, rename, detach
 clients, watch a live preview of what's running in each session, and jump
-into project directories via a built-in sessionizer. For the quick path,
-`tm NAME` and `tm .` attach directly without opening the UI.
+into project directories via a built-in sessionizer. It also shows which
+coding agents (Claude Code, Codex, OpenCode, Antigravity, ...) run in which
+pane and which of them waits for you, and jumps straight to that pane. For
+the quick path, `tm NAME` and `tm .` attach directly without opening the UI.
 
 ```
 ┌─ tmux manager ──────────────── 3 sessions · by name · inside tmux ─┐
@@ -34,6 +36,7 @@ switches the current client.
 | tmux | any recent version (tested with 3.7c) | must be on `PATH` |
 | Python | ≥ 3.11 | uses stdlib `tomllib` |
 | Textual | ≥ 1.0 | installed automatically |
+| regex | ≥ 2024.4 | installed automatically; runs the agent screen rules |
 
 macOS and Linux are supported (anywhere tmux runs).
 
@@ -107,6 +110,7 @@ it with `cp docs/tm.1 /usr/local/share/man/man1/`.
 | `r` | rename the selected session |
 | `D` | detach all clients from the selected session — handy when a session is "attached" on another terminal |
 | `p` | open the project sessionizer |
+| `a` | open the agents screen: every coding agent in every pane, blocked first |
 | `/` | filter the session list as you type (`Esc` clears, `Enter` jumps to the match) |
 | `s` | toggle sorting between name and last activity |
 | `v` | show / hide the preview pane |
@@ -120,6 +124,16 @@ it with `cp docs/tm.1 /usr/local/share/man/man1/`.
 | any text | fuzzy-filter the projects (best match first) |
 | `↓` / `↑`, `ctrl+n` / `ctrl+p` | move the cursor |
 | `Enter` | create a session for the project (or attach if it already exists, marked `●`) |
+| `?` | show the key help |
+| `Esc` | clear the filter; press again to go back to the session list |
+
+### Agents screen (`a`)
+
+| Key | Action |
+|---|---|
+| `j` / `k` / `↓` / `↑` | move the cursor |
+| `Enter` | jump to exactly that agent's pane: selects its window and pane, then attaches or switches |
+| `/` | filter the agents as you type (agent, session, window, path, state) |
 | `?` | show the key help |
 | `Esc` | clear the filter; press again to go back to the session list |
 
@@ -150,6 +164,53 @@ whether a dev server is still running before you attach. It hides itself
 below 80 columns so the table stays readable in small popups; `v` toggles
 it by hand. tmux calls run in the background, so holding `j` never stalls
 the UI.
+
+### Agent status
+
+`tm` recognises coding agents running in tmux panes and shows what each one
+is doing:
+
+| State | Meaning |
+|---|---|
+| 🔴 blocked | the agent waits for you: a permission prompt, a question, a trust dialog |
+| 🟢 working | its pane changed in the last `agents.working_grace_seconds` (default 3), or the screen shows a working indicator |
+| ⚪ idle | anything else, usually waiting for the next prompt |
+
+The session list has an **Agents** column with a roll-up per session
+(`🔴1 🟢2`; empty when the session runs no agent). Press `a` for the agents
+screen: one row per agent pane with state, agent, session, window, path and
+the time since the pane last changed, blocked agents first. The preview shows
+that agent's pane, and `Enter` takes you into exactly that pane, even when it
+sits in a window the session isn't showing.
+
+**Which agents.** Claude Code, Codex, OpenCode, Antigravity (`agy`), Gemini,
+Cursor, Copilot, Amp, Cline, Devin, Droid, Grok, Hermes, Kilo, Kimi, Kiro,
+Letta, Maki, Muse, Pi, Qoder, Qwen, omp and Mastra Code. `tm` finds them in
+the process table, not in the command tmux reports: Claude Code, for example,
+shows up there as its version number (`2.1.281`). It walks the processes
+below each pane and matches their names, including the script run by `node`,
+`bun` or `python`. The agent the pane started wins over anything that agent
+starts itself (MCP servers, sub-agents).
+
+**Two signals** decide the state:
+
+1. *Activity*, for every agent: a pane whose text changed within the grace
+   period is working. This matters because Claude Code shows no spinner while
+   it streams an answer; its screen looks idle but keeps changing. For a
+   window with a single pane, tmux's window activity counts too; in a split
+   window only the pane's own text does.
+2. *Screen rules* from [herdr](https://github.com/herdrdev/herdr), mainly for
+   blocked: `tm` bundles herdr's agent manifests unchanged and evaluates them
+   with a Python port of herdr's rule engine. A blocked screen always wins;
+   otherwise activity or a working rule means working.
+
+**Limits.** When an agent changes its user interface, or for an agent without
+a manifest (omp, Mastra Code), a waiting prompt shows as idle instead of
+blocked until the manifest knows it. Output that changes while nobody works
+(a clock in the agent's own status line) would read as working. The time
+since the last change is exact only once `tm` has watched a pane change;
+before that it is estimated from the window's activity. `tm` only watches: it
+does not start, restart or steer agents.
 
 ### Attach vs. switch
 
@@ -223,6 +284,11 @@ show_preview = true
 preview_width = 40
 # Initial sort order: "name" or "activity" (most recent first); s toggles.
 sort = "name"
+
+[agents]
+# An agent whose pane changed within this many seconds counts as working
+# (minimum 0.5).
+working_grace_seconds = 3.0
 ```
 
 Example with several project roots:
@@ -300,6 +366,12 @@ popup — a very fast way to hop between sessions without leaving tmux.
   or it was switched off (`v`, or `show_preview = false` in the config).
 - **`tm: config error: …`** — the config file has a typo or a wrong type;
   the message names the key. Fix it or delete the file to get the defaults.
+- **An agent waits for me but shows ⚪ idle** — the agent's prompt is new to
+  its screen manifest (see [Agent status](#agent-status)). Newer manifests
+  from herdr can be pulled in with `scripts/sync_herdr_manifests.py`.
+- **An agent is missing from the agents screen** — it runs under a name `tm`
+  does not know, e.g. a custom wrapper script. `tm agents --json` lists what
+  was found.
 
 ## Development
 
@@ -310,14 +382,21 @@ src/tmux_manager/
 ├── cli.py               # entry point: runs the app, then attaches/switches
 ├── app.py               # Textual App, pushes the main screen
 ├── tmux.py              # the ONLY place that shells out to tmux (testable seam)
+├── agents.py            # agent detection (process table) and state (activity + rules)
+├── manifests.py         # Python port of herdr's manifest rule engine
+├── agent_manifests/     # herdr's agent manifests (*.toml), LICENSE, NOTICE
 ├── config.py            # config.toml loading (stdlib tomllib)
-├── models.py            # TmuxSession, PostAction, NewSessionRequest dataclasses
+├── models.py            # TmuxSession, TmuxPane, PostAction, NewSessionRequest
 ├── util.py              # path shortening, relative time formatting
 ├── styles.tcss          # Textual CSS
 └── screens/
     ├── sessions.py      # main screen: table + preview + filter
+    ├── agents.py        # agents screen (a)
     ├── sessionizer.py   # project picker
+    ├── widgets.py       # filter input, pane tail rendering
     └── modals.py        # new/rename/confirm dialogs
+scripts/
+└── sync_herdr_manifests.py  # re-vendor herdr's manifests for a given commit
 ```
 
 Two design decisions worth knowing before hacking on it:
@@ -326,8 +405,9 @@ Two design decisions worth knowing before hacking on it:
    still be in alternate-screen mode). Instead the app exits with a
    `PostAction` result and `cli.main()` performs the attach/switch after
    Textual has restored the terminal.
-2. **`tmux.py` is the only subprocess boundary.** Everything else is pure
-   Python, which keeps the TUI fully testable with fakes. The `TM_SOCKET`
+2. **`tmux.py` is the only tmux boundary.** The one other subprocess, `ps`
+   for agent detection, sits behind `agents.read_processes()`. Everything
+   else is pure Python, which keeps the TUI fully testable with fakes. The `TM_SOCKET`
    environment variable routes every tmux call to an isolated server
    (`tmux -L <socket>`) so tests never touch your real sessions.
 
@@ -342,9 +422,11 @@ Two design decisions worth knowing before hacking on it:
 
 The same three steps run in GitHub Actions on Python 3.11–3.14. The tests
 cover the tmux wrapper (argv construction, output parsing, error handling),
-config validation, and the TUI itself via Textual's headless test pilot
-(navigation, attach/switch results, filtering, sorting, preview, dialogs,
-sessionizer) — all against a fake tmux, so no server is needed.
+config validation, agent detection and the manifest rule engine (with
+screens captured from real agents in `tests/fixtures/`), and the TUI itself
+via Textual's headless test pilot (navigation, attach/switch results,
+filtering, sorting, preview, dialogs, sessionizer, agents screen) — all
+against a fake tmux, so no server is needed.
 
 ### Manual end-to-end testing
 
@@ -365,6 +447,24 @@ unset TM_SOCKET
 Note: if you run this from a shell that is itself inside tmux, `Enter`
 performs a *switch* (not an attach) — that's the expected behavior.
 
+To try agent status the same way, start an agent on the isolated server with
+a clean environment (when you run this from inside Claude Code, unset
+`CLAUDECODE` and the `CLAUDE_CODE_*` variables first, or the agent will not
+behave like an interactive session):
+
+```bash
+export TM_SOCKET=tmtest
+mkdir -p /tmp/agent-demo && cd /tmp/agent-demo
+tmux -L tmtest new-session -d -s agent -c /tmp/agent-demo
+tmux -L tmtest send-keys -t agent 'claude --model haiku' Enter
+tm status           # 🔴1 while the trust dialog is open
+tm agents --json
+tm                  # then press a
+
+tmux -L tmtest kill-server
+unset TM_SOCKET
+```
+
 ## Roadmap ideas
 
 Not implemented yet, collected during planning:
@@ -376,3 +476,13 @@ Not implemented yet, collected during planning:
 - Toggle back to the previous session with one key
 - Git branch / dirty status per project in the sessionizer; zoxide as an additional project source
 - Activity/bell indicators and the foreground process per session in the list
+  (agent status per session is done, see [Agent status](#agent-status))
+- Agent status: notify when an agent becomes blocked, and user-provided
+  manifests for agents herdr doesn't cover
+
+## Credits
+
+The agent screen manifests in `src/tmux_manager/agent_manifests/` are taken
+unchanged from [herdr](https://github.com/herdrdev/herdr) (Apache License 2.0,
+see the `LICENSE` and `NOTICE` files in that directory), and `manifests.py`
+ports herdr's rule engine to Python.
