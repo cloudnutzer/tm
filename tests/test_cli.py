@@ -7,7 +7,7 @@ from tmux_manager import __version__, cli
 from tmux_manager.config import Config, ConfigError
 from tmux_manager.models import PostAction
 
-from .conftest import FakeTmux
+from .conftest import CLAUDE_TRUST, FakeTmux, make_pane
 
 
 def test_version_flag_prints_version(capsys: pytest.CaptureFixture[str]) -> None:
@@ -25,6 +25,9 @@ def test_help_flag_lists_commands_and_keys(capsys: pytest.CaptureFixture[str]) -
     assert "sessionizer" in out
     assert "tm ls [--json]" in out
     assert "tm kill NAME" in out
+    assert "tm agents [--json]" in out
+    assert "tm status [--ascii]" in out
+    assert "agents: coding agents" in out
 
 
 def test_unknown_argument_fails() -> None:
@@ -217,3 +220,82 @@ def test_kill_reports_tmux_error(
         cli.main(["kill", "gone"])
     assert exc.value.code == 1
     assert "can't find session" in capsys.readouterr().err
+
+
+# ----------------------------------------------------------------- agents
+
+
+@pytest.fixture
+def with_agents(fake_tmux: FakeTmux, monkeypatch: pytest.MonkeyPatch) -> FakeTmux:
+    """beta runs a blocked claude (window 2) and an idle codex; sampling does not sleep."""
+    monkeypatch.setattr(cli.agents.time, "sleep", lambda seconds: None)
+    fake_tmux.add_agent(make_pane("beta", "%2", 200, path="/tmp/beta"), "codex")
+    fake_tmux.add_agent(
+        make_pane("beta", "%5", 500, window=2, pane=1, window_panes=2), "claude", CLAUDE_TRUST
+    )
+    return fake_tmux
+
+
+def test_status_line(
+    cli_env: list[tuple[str, list[str]]], with_agents: FakeTmux, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cli.main(["status"])
+    assert capsys.readouterr().out == "🔴1 ⚪1\n"
+    cli.main(["status", "--ascii"])
+    assert capsys.readouterr().out == "B1 I1\n"
+
+
+def test_status_is_empty_without_agents(
+    cli_env: list[tuple[str, list[str]]], fake_tmux: FakeTmux, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cli.main(["status"])
+    assert capsys.readouterr().out == ""
+
+
+def test_agents_json(
+    cli_env: list[tuple[str, list[str]]], with_agents: FakeTmux, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cli.main(["agents", "--json"])
+    data = json.loads(capsys.readouterr().out)
+    assert [(a["agent"], a["state"]) for a in data] == [("claude", "blocked"), ("codex", "idle")]
+    assert set(data[0]) == {
+        "session",
+        "window",
+        "window_name",
+        "pane",
+        "pane_id",
+        "agent",
+        "state",
+        "path",
+        "title",
+        "seconds_since_change",
+    }
+    assert (data[0]["session"], data[0]["window"], data[0]["pane"]) == ("beta", 2, 1)
+    assert data[0]["pane_id"] == "%5"
+    assert isinstance(data[0]["seconds_since_change"], int)
+
+
+def test_agents_text(
+    cli_env: list[tuple[str, list[str]]], with_agents: FakeTmux, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cli.main(["agents"])
+    lines = capsys.readouterr().out.splitlines()
+    assert lines[0].split()[:5] == ["🔴", "blocked", "claude", "beta:2.1", "%5"]
+    assert lines[1].split()[:5] == ["⚪", "idle", "codex", "beta:0.0", "%2"]
+    assert lines[1].endswith("/tmp/beta")
+
+
+def test_ls_json_includes_agents_per_session(
+    cli_env: list[tuple[str, list[str]]], with_agents: FakeTmux, capsys: pytest.CaptureFixture[str]
+) -> None:
+    cli.main(["ls", "--json"])
+    data = json.loads(capsys.readouterr().out)
+    assert data[0]["name"] == "alpha"
+    assert data[0]["agents"] == []
+    assert [a["pane_id"] for a in data[1]["agents"]] == ["%5", "%2"]
+    assert data[1]["command"] == "vim"  # the existing fields stay
+
+
+def test_agents_and_status_are_commands() -> None:
+    assert cli.normalize_argv(["agents", "--json"]) == ["agents", "--json"]
+    assert cli.normalize_argv(["status"]) == ["status"]

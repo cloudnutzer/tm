@@ -5,16 +5,18 @@ import json
 import os
 import shutil
 import sys
+import time
 from dataclasses import asdict
 from pathlib import Path
-from typing import NoReturn
+from typing import Any, NoReturn
 
-from . import __version__, tmux
+from . import __version__, agents, tmux
+from .agents import STATE_ICONS, AgentStatus
 from .config import Config, ConfigError, load_config
 from .models import PostAction
 from .util import relative_time, short_path
 
-COMMANDS = ("open", "ls", "kill")
+COMMANDS = ("open", "ls", "kill", "agents", "status")
 
 EPILOG = """\
 commands:
@@ -22,8 +24,13 @@ commands:
   tm NAME           attach to session NAME, creating it in sessions.default_dir
   tm DIR            attach to the session for directory DIR, creating it there;
                     DIR must contain a "/" or be ".", ".." or start with "~"
-  tm ls [--json]    list sessions
+  tm ls [--json]    list sessions (with their agents in --json)
   tm kill NAME      kill session NAME
+  tm agents [--json]
+                    list coding agents in tmux panes: blocked, working, idle
+  tm status [--ascii]
+                    one line for the tmux status bar, e.g. "🔴1 🟢2";
+                    empty without agents
 
 keys:
   j/k, arrows     move cursor
@@ -49,10 +56,12 @@ configuration:
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="tm",
-        usage="%(prog)s [--help] [--version] [NAME | DIR | ls [--json] | kill NAME]",
+        usage="%(prog)s [--help] [--version] "
+        "[NAME | DIR | ls [--json] | kill NAME | agents [--json] | status [--ascii]]",
         description="Interactive terminal UI for managing tmux sessions: "
         "overview with live preview, attach/switch, create, kill, rename, "
-        "detach clients, and a project sessionizer. "
+        "detach clients, a project sessionizer, and the state of coding agents "
+        "(Claude Code, Codex, OpenCode, ...) running in tmux panes. "
         "With a NAME or DIR argument, tm attaches directly without the UI.",
         epilog=EPILOG,
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -65,6 +74,12 @@ def build_parser() -> argparse.ArgumentParser:
     ls_parser.add_argument("--json", action="store_true", help="machine-readable output")
     kill_parser = commands.add_parser("kill", help="kill a session")
     kill_parser.add_argument("name", help="exact session name")
+    agents_parser = commands.add_parser("agents", help="list coding agents in tmux panes")
+    agents_parser.add_argument("--json", action="store_true", help="machine-readable output")
+    status_parser = commands.add_parser("status", help="agent summary for the tmux status bar")
+    status_parser.add_argument(
+        "--ascii", action="store_true", help="letters instead of emoji (B1 W2 I1)"
+    )
     return parser
 
 
@@ -132,13 +147,45 @@ def open_target(target: str, config: Config) -> PostAction:
     return tmux.attach_action(name)
 
 
-def print_sessions(as_json: bool) -> None:
+def sample_agents(config: Config) -> list[AgentStatus]:
+    try:
+        return agents.sample(config.working_grace_seconds)
+    except tmux.TmuxError as error:
+        fail(str(error))
+
+
+def agent_record(status: AgentStatus, now: int) -> dict[str, Any]:
+    pane = status.pane
+    return {
+        "session": pane.session,
+        "window": pane.window_index,
+        "window_name": pane.window_name,
+        "pane": pane.pane_index,
+        "pane_id": pane.pane_id,
+        "agent": status.agent,
+        "state": status.state,
+        "path": pane.current_path,
+        "title": pane.title,
+        "seconds_since_change": max(0, now - status.last_change),
+    }
+
+
+def print_sessions(as_json: bool, config: Config) -> None:
     try:
         sessions = tmux.list_sessions()
     except tmux.TmuxError as error:
         fail(str(error))
     if as_json:
-        print(json.dumps([asdict(s) for s in sessions], indent=2))
+        statuses = sample_agents(config) if sessions else []
+        now = int(time.time())
+        records = [
+            {
+                **asdict(s),
+                "agents": [agent_record(a, now) for a in statuses if a.pane.session == s.name],
+            }
+            for s in sessions
+        ]
+        print(json.dumps(records, indent=2, ensure_ascii=False))
         return
     rows = [
         (
@@ -157,6 +204,37 @@ def print_sessions(as_json: bool) -> None:
         print("  ".join(cell.ljust(widths[i]) for i, cell in enumerate(row[:4])) + "  " + row[4])
 
 
+def print_agents(as_json: bool, config: Config) -> None:
+    statuses = sample_agents(config)
+    now = int(time.time())
+    if as_json:
+        records = [agent_record(s, now) for s in statuses]
+        print(json.dumps(records, indent=2, ensure_ascii=False))
+        return
+    rows = [
+        (
+            f"{STATE_ICONS[s.state]} {s.state}",
+            s.agent,
+            f"{s.pane.session}:{s.pane.window_index}.{s.pane.pane_index}",
+            s.pane.pane_id,
+            relative_time(s.last_change, now),
+            short_path(s.pane.current_path),
+        )
+        for s in statuses
+    ]
+    if sys.stdout.isatty():
+        rows.insert(0, ("STATE", "AGENT", "TARGET", "PANE", "CHANGED", "PATH"))
+    widths = [max(len(row[i]) for row in rows) for i in range(5)] if rows else []
+    for row in rows:
+        print("  ".join(cell.ljust(widths[i]) for i, cell in enumerate(row[:5])) + "  " + row[5])
+
+
+def print_status(ascii: bool, config: Config) -> None:
+    line = agents.rollup(sample_agents(config), ascii=ascii)
+    if line:
+        print(line)
+
+
 def kill(name: str) -> None:
     try:
         tmux.kill_session(name)
@@ -173,7 +251,11 @@ def main(argv: list[str] | None = None) -> None:
     except ConfigError as error:
         fail(f"config error: {error}", code=2)
     if args.command == "ls":
-        print_sessions(as_json=args.json)
+        print_sessions(as_json=args.json, config=config)
+    elif args.command == "agents":
+        print_agents(as_json=args.json, config=config)
+    elif args.command == "status":
+        print_status(ascii=args.ascii, config=config)
     elif args.command == "kill":
         kill(args.name)
     elif args.command == "open":
