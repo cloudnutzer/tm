@@ -8,6 +8,7 @@ from typing import Any, Literal
 
 DEFAULT_PROJECT_ROOTS = (Path("~/git-projects").expanduser(),)
 MIN_REFRESH_SECONDS = 0.2
+MIN_GRACE_SECONDS = 0.5
 SORT_MODES = ("name", "activity")
 
 SortMode = Literal["name", "activity"]
@@ -27,6 +28,8 @@ class Config:
     preview_width: int = 40
     """Width of the preview pane in percent of the terminal width."""
     sort: SortMode = "name"
+    working_grace_seconds: float = 3.0
+    """An agent whose pane changed within this many seconds counts as working."""
 
 
 def config_path() -> Path:
@@ -50,6 +53,7 @@ def parse_config(data: dict[str, Any]) -> Config:
     projects = _table(data, "projects")
     sessions = _table(data, "sessions")
     ui = _table(data, "ui")
+    agents = _table(data, "agents")
 
     raw_roots = projects.get("roots", [])
     if not isinstance(raw_roots, list) or not all(isinstance(r, str) for r in raw_roots):
@@ -79,6 +83,12 @@ def parse_config(data: dict[str, Any]) -> Config:
         show_preview=_bool(ui, "show_preview", defaults.show_preview),
         preview_width=int(preview_width),
         sort=sort,  # type: ignore[arg-type]  # validated against SORT_MODES above
+        working_grace_seconds=_number(
+            agents,
+            "working_grace_seconds",
+            defaults.working_grace_seconds,
+            minimum=MIN_GRACE_SECONDS,
+        ),
     )
 
 

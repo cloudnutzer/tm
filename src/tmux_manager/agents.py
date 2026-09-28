@@ -1,4 +1,4 @@
-"""Which coding agent runs in which tmux pane.
+"""Which coding agent runs in which tmux pane, and what state it is in.
 
 ``pane_current_command`` is not enough to tell: Claude Code, for example,
 shows up as its version (``2.1.281``) because its binary is named after the
@@ -7,18 +7,40 @@ below each pane's ``pane_pid`` is walked, and argv0 (falling back to the
 kernel's command name) is matched against the known agent names. Agents that
 run inside a runtime (``node /x/bin/codex``) are recognised by their script.
 
-``read_processes()`` is the only function here that starts a subprocess, so
-tests replace it with a fake just like ``tmux.py``.
+The state of an agent pane comes from two signals:
+
+1. Activity, for every agent: a pane whose text changed within
+   ``agents.working_grace_seconds`` is ``working``. Claude Code, for one, shows
+   no spinner while it streams an answer, but its screen keeps changing. For
+   a window with a single pane tmux's ``window_activity`` says the same.
+2. herdr's screen manifests (see ``manifests.py``), mainly for ``blocked``:
+   permission prompts, questions, trust dialogs.
+
+``read_processes()`` is the only function here that starts a subprocess
+itself, so tests replace it with a fake just like ``tmux.py``.
 """
 
 from __future__ import annotations
 
 import subprocess
-from collections import defaultdict
+import time
+from collections import Counter, defaultdict
 from collections.abc import Iterable
 from dataclasses import dataclass, replace
+from functools import cache
+from typing import Literal
 
+from . import tmux
+from .manifests import Detection, bundled_manifests, detect
 from .models import TmuxPane
+
+AgentState = Literal["blocked", "working", "idle"]
+STATE_ORDER: dict[AgentState, int] = {"blocked": 0, "working": 1, "idle": 2}
+STATE_ICONS: dict[AgentState, str] = {"blocked": "🔴", "working": "🟢", "idle": "⚪"}
+STATE_LETTERS: dict[AgentState, str] = {"blocked": "B", "working": "W", "idle": "I"}
+# One-shot commands (tm agents, tm status) look twice, this far apart, to see
+# whether a pane is changing.
+SAMPLE_DELAY_SECONDS = 0.7
 
 # Agent id (the herdr manifest id) -> executable names and aliases.
 # Taken from herdr's lookup table (src/detect/mod.rs); agents without a screen
@@ -109,12 +131,22 @@ def _parse_args(lines: Iterable[str]) -> dict[int, str]:
     return parsed
 
 
+@cache
+def known_names() -> dict[str, str]:
+    """Executable name -> agent id, from AGENT_NAMES plus the manifests' ids and aliases."""
+    names = {name: agent for agent, aliases in AGENT_NAMES.items() for name in aliases}
+    for manifest in bundled_manifests().values():
+        for name in (manifest.id, *manifest.aliases):
+            names.setdefault(name.lower(), manifest.id)
+    return names
+
+
 def lookup_agent(name: str) -> str | None:
     """Agent id for an executable name or path, or None."""
     normalized = normalize_name(name)
-    for agent, names in AGENT_NAMES.items():
-        if normalized in names:
-            return agent
+    agent = known_names().get(normalized)
+    if agent is not None:
+        return agent
     # Muse's launcher execs "muse-bin-<version>".
     if normalized.startswith("muse-bin-") and normalized[9:10].isdigit():
         return "muse"
@@ -217,3 +249,135 @@ def identify_panes(panes: Iterable[TmuxPane], processes: Iterable[Process]) -> l
         replace(pane, agent=_tree_agent(pane.pane_pid, by_pid, children)) if pane.pane_pid else pane
         for pane in panes
     ]
+
+
+# -------------------------------------------------------------------- state
+
+
+@dataclass(frozen=True)
+class AgentStatus:
+    pane: TmuxPane
+    state: AgentState
+    last_change: int
+    """Epoch seconds of the last observed change of the pane."""
+    rule: str | None = None
+    """Id of the manifest rule that matched, for debugging."""
+
+    @property
+    def agent(self) -> str:
+        return self.pane.agent or "?"
+
+
+def resolve_state(
+    detection: Detection, active: bool, previous: AgentState | None = None
+) -> AgentState:
+    """Combine a manifest detection with the activity signal.
+
+    ``blocked`` from a manifest wins; a rule with ``skip_state_update`` (an
+    overlay such as a transcript viewer) keeps the previous state; otherwise
+    activity or a ``working`` rule means working, and everything else idle.
+    """
+    if detection.state == "blocked":
+        return "blocked"
+    if detection.skip_state_update and previous is not None:
+        return previous
+    if active or detection.state == "working":
+        return "working"
+    return "idle"
+
+
+def normalize_screen(text: str) -> str:
+    """Captured pane text without trailing blanks on lines and at the end."""
+    lines = [line.rstrip() for line in text.split("\n")]
+    while lines and not lines[-1]:
+        lines.pop()
+    return "\n".join(lines) + "\n" if lines else ""
+
+
+@dataclass
+class _Seen:
+    digest: int
+    changed_at: float | None
+    """When the pane text was last seen changing; None if never."""
+    state: AgentState
+
+
+class AgentTracker:
+    """Remembers each agent pane between refreshes to see it change."""
+
+    def __init__(self, grace_seconds: float = 3.0) -> None:
+        self.grace_seconds = grace_seconds
+        self._seen: dict[str, _Seen] = {}
+
+    def observe(self, pane: TmuxPane, screen: str, now: float) -> AgentStatus:
+        screen = normalize_screen(screen)
+        digest = hash(screen)
+        seen = self._seen.get(pane.pane_id)
+        changed_at = seen.changed_at if seen else None
+        if seen is not None and seen.digest != digest:
+            changed_at = now
+        # window_activity covers every pane of a window, so it only speaks for
+        # this pane when the window has no other.
+        # For "time since last change" it is still the best guess until this
+        # pane has been seen changing.
+        single = pane.window_panes <= 1
+        if single or changed_at is None:
+            last_change = max(changed_at or 0, pane.window_activity)
+        else:
+            last_change = changed_at
+        active = changed_at is not None and now - changed_at < self.grace_seconds
+        if single and now - pane.window_activity < self.grace_seconds:
+            active = True
+        manifest = bundled_manifests().get(pane.agent or "")
+        detection = detect(manifest, screen, pane.title) if manifest else Detection()
+        state = resolve_state(detection, active, seen.state if seen else None)
+        self._seen[pane.pane_id] = _Seen(digest=digest, changed_at=changed_at, state=state)
+        return AgentStatus(pane, state, int(last_change), detection.rule)
+
+    def retain(self, pane_ids: Iterable[str]) -> None:
+        """Forget panes that are gone."""
+        keep = set(pane_ids)
+        self._seen = {pane_id: seen for pane_id, seen in self._seen.items() if pane_id in keep}
+
+
+def collect(tracker: AgentTracker) -> list[AgentStatus]:
+    """Current status of every agent pane; only agent panes are captured."""
+    panes = [pane for pane in identify_panes(tmux.list_panes(), read_processes()) if pane.agent]
+    statuses = []
+    for pane in panes:
+        try:
+            screen = tmux.capture_pane_by_id(pane.pane_id)
+        except tmux.TmuxError:
+            continue  # the pane closed in the meantime
+        statuses.append(tracker.observe(pane, screen, time.time()))
+    tracker.retain(pane.pane_id for pane in panes)
+    return sort_statuses(statuses)
+
+
+def sample(grace_seconds: float, delay: float = SAMPLE_DELAY_SECONDS) -> list[AgentStatus]:
+    """Agent status for one-shot commands: two looks ``delay`` seconds apart."""
+    tracker = AgentTracker(grace_seconds)
+    if not collect(tracker):
+        return []
+    time.sleep(delay)
+    return collect(tracker)
+
+
+def sort_statuses(statuses: Iterable[AgentStatus]) -> list[AgentStatus]:
+    """Blocked first, then working, then idle; stable by position within a state."""
+    return sorted(
+        statuses,
+        key=lambda s: (
+            STATE_ORDER[s.state],
+            s.pane.session.lower(),
+            s.pane.window_index,
+            s.pane.pane_index,
+        ),
+    )
+
+
+def rollup(statuses: Iterable[AgentStatus], *, ascii: bool = False) -> str:
+    """Compact count per state, e.g. ``🔴1 🟢2`` (``B1 W2``); empty without agents."""
+    counts = Counter(status.state for status in statuses)
+    symbols = STATE_LETTERS if ascii else STATE_ICONS
+    return " ".join(f"{symbols[state]}{counts[state]}" for state in STATE_ORDER if counts[state])
