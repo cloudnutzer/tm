@@ -156,3 +156,45 @@ def test_popup_binding_with_note_and_full_path(monkeypatch: pytest.MonkeyPatch) 
     fake, _ = fake_run(stdout=line)
     monkeypatch.setattr(tmux, "_run", fake)
     assert tmux.popup_binding() == "M-s"
+
+
+def test_list_panes_parses_fields_with_utf8_flag(monkeypatch: pytest.MonkeyPatch) -> None:
+    claude = line(
+        "work", "1", "editor", "0", "%3", "4242", "2.1.281", "/tmp/x", "1750000000", "2",
+        "✳ Claude Code",
+    )  # fmt: skip
+    shell = line("my session", "2", "zsh", "1", "%7", "99", "zsh", "/tmp", "1750000100", "1", "")
+    fake, calls = fake_run(stdout=claude + "\n" + shell + "\n")
+    monkeypatch.setattr(tmux, "_run", fake)
+    panes = tmux.list_panes()
+    assert calls == [["-u", "list-panes", "-a", "-F", tmux.PANE_FORMAT]]
+    assert [p.pane_id for p in panes] == ["%3", "%7"]
+    first = panes[0]
+    assert (first.session, first.window_index, first.window_name, first.pane_index) == (
+        "work",
+        1,
+        "editor",
+        0,
+    )
+    assert first.pane_pid == 4242
+    assert first.command == "2.1.281"
+    assert first.current_path == "/tmp/x"
+    assert first.window_activity == 1750000000
+    assert first.window_panes == 2
+    assert first.title == "✳ Claude Code"
+    assert first.agent is None
+    assert panes[1].session == "my session"
+    assert panes[1].title == ""
+
+
+def test_list_panes_keeps_separator_inside_title(monkeypatch: pytest.MonkeyPatch) -> None:
+    odd = line("s", "0", "w", "0", "%1", "1", "zsh", "/", "0", "1", "a\x1fb")
+    fake, _ = fake_run(stdout=odd + "\n")
+    monkeypatch.setattr(tmux, "_run", fake)
+    assert tmux.list_panes()[0].title == "a\x1fb"
+
+
+def test_list_panes_no_server_is_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake, _ = fake_run(stderr="no server running on /tmp/tmux-501/default", returncode=1)
+    monkeypatch.setattr(tmux, "_run", fake)
+    assert tmux.list_panes() == []
