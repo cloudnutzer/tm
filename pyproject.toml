@@ -6,7 +6,7 @@ readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
 requires-python = ">=3.11"
-dependencies = ["textual>=1.0"]
+dependencies = ["textual>=1.0", "regex>=2024.4"]
 keywords = ["tmux", "tui", "terminal", "sessions", "sessionizer"]
 classifiers = [
     "Environment :: Console",
@@ -25,7 +25,7 @@ Issues = "https://github.com/cloudnutzer/tm/issues"
 tm = "tmux_manager.cli:main"
 
 [project.optional-dependencies]
-dev = ["pytest", "pytest-asyncio", "ruff", "mypy"]
+dev = ["pytest", "pytest-asyncio", "ruff", "mypy", "types-regex"]
 
 [build-system]
 requires = ["hatchling"]

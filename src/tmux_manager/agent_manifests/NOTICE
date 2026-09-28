@@ -1,0 +1,9 @@
+The *.toml files in this directory are the agent screen manifests of herdr
+(https://github.com/herdrdev/herdr), copied unchanged from src/detect/manifests at commit
+0d5d6f1f317e238c8297076bc6ab5c3a0cd56283.
+
+herdr is licensed under the Apache License 2.0; see LICENSE in this directory.
+tm evaluates them with its own Python port of herdr's rule engine
+(src/tmux_manager/manifests.py). Refresh with:
+
+    python scripts/sync_herdr_manifests.py <commit>

@@ -12,6 +12,7 @@ def test_missing_file_gives_defaults(tmp_path: Path) -> None:
     assert cfg.list_refresh_seconds == 2.0
     assert cfg.show_preview is True
     assert cfg.sort == "name"
+    assert cfg.working_grace_seconds == 3.0
 
 
 def test_load_full_config(tmp_path: Path) -> None:
@@ -21,6 +22,7 @@ def test_load_full_config(tmp_path: Path) -> None:
         '[sessions]\ndefault_dir = "~/code"\n'
         "[ui]\nlist_refresh_seconds = 5\nshow_preview = false\n"
         'preview_width = 50\nsort = "activity"\n'
+        "[agents]\nworking_grace_seconds = 5\n"
     )
     cfg = load_config(path)
     assert cfg.project_roots == (Path("~/code").expanduser(), Path("/srv/projects"))
@@ -30,6 +32,7 @@ def test_load_full_config(tmp_path: Path) -> None:
     assert cfg.show_preview is False
     assert cfg.preview_width == 50
     assert cfg.sort == "activity"
+    assert cfg.working_grace_seconds == 5.0
 
 
 def test_partial_config_keeps_other_defaults(tmp_path: Path) -> None:
@@ -62,6 +65,7 @@ def test_invalid_toml_is_a_config_error(tmp_path: Path) -> None:
         ("[ui]\npreview_width = 95\n", "preview_width must be at most 90"),
         ("[ui]\npreview_width = 5\n", "preview_width must be at least"),
         ('ui = "nope"\n', r"\[ui\] must be a table"),
+        ("[agents]\nworking_grace_seconds = 0\n", "working_grace_seconds must be at least"),
     ],
 )
 def test_invalid_values_are_config_errors(tmp_path: Path, content: str, message: str) -> None:

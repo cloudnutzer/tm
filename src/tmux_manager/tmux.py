@@ -185,6 +185,11 @@ def capture_pane(name: str) -> str:
     return _run_or_raise(["capture-pane", "-ep", "-t", f"={name}:"])
 
 
+def capture_pane_by_id(pane_id: str, *, colors: bool = False) -> str:
+    """Visible text of one pane (``%12``); with ``colors`` including ANSI escapes."""
+    return _run_or_raise([UTF8, "capture-pane", "-ep" if colors else "-p", "-t", pane_id])
+
+
 def has_session(name: str) -> bool:
     return _run(["has-session", "-t", f"={name}"]).returncode == 0
 
