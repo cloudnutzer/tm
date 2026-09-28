@@ -13,7 +13,7 @@ import os
 import re
 import subprocess
 
-from .models import PostAction, TmuxSession
+from .models import PostAction, TmuxPane, TmuxSession
 
 # \x1f (ASCII unit separator) cannot appear in session names or paths,
 # so splitting on it is unambiguous.
@@ -28,6 +28,27 @@ LIST_FORMAT = "\x1f".join(
         "#{pane_current_command}",
     )
 )
+
+PANE_FORMAT = "\x1f".join(
+    (
+        "#{session_name}",
+        "#{window_index}",
+        "#{window_name}",
+        "#{pane_index}",
+        "#{pane_id}",
+        "#{pane_pid}",
+        "#{pane_current_command}",
+        "#{pane_current_path}",
+        "#{window_activity}",
+        "#{window_panes}",
+        # last: a title is set by the program and could contain anything
+        "#{pane_title}",
+    )
+)
+# Global flag placed before the command: without it tmux replaces non-ASCII
+# characters in formats and captures by "_" when the locale is not UTF-8
+# (e.g. under launchd), and agent titles such as "✳ Claude Code" get lost.
+UTF8 = "-u"
 
 _NO_SERVER_MARKERS = ("no server running", "error connecting to")
 # e.g. "bind-key -T prefix S display-popup -E -w 80% -h 75% tm"
@@ -104,6 +125,39 @@ def list_sessions() -> list[TmuxSession]:
             )
         )
     return sessions
+
+
+def list_panes() -> list[TmuxPane]:
+    """Every pane of every session."""
+    result = _run([UTF8, "list-panes", "-a", "-F", PANE_FORMAT])
+    if result.returncode != 0:
+        stderr = result.stderr.strip()
+        if any(marker in stderr for marker in _NO_SERVER_MARKERS):
+            return []
+        raise TmuxError(stderr or "tmux list-panes failed")
+    panes = []
+    # split("\n"), not splitlines(): titles may contain other line breaks
+    for line in result.stdout.split("\n"):
+        if not line:
+            continue
+        fields = line.split("\x1f", 10)
+        session, window, window_name, pane, pane_id, pid, command, path, activity = fields[:9]
+        panes.append(
+            TmuxPane(
+                session=session,
+                window_index=int(window),
+                window_name=window_name,
+                pane_index=int(pane),
+                pane_id=pane_id,
+                pane_pid=int(pid or 0),
+                command=command,
+                current_path=path,
+                window_activity=int(activity or 0),
+                window_panes=int(fields[9] or 1),
+                title=fields[10],
+            )
+        )
+    return panes
 
 
 def new_session(name: str, start_dir: str | None = None) -> None:
