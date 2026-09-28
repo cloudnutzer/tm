@@ -1,0 +1,40 @@
+  Copy mode glides through captured text,
+  Sessions persist, what comes next?
+  Detach and reattach with grace,
+  Tmux panes hold your working space.
+
+  Arrange them neat in grids so tight,
+  Monitor logs while tests run right,
+  In every split a new frontier,
+  Terminal mastery crystallizes here.
+
+✻ Cooked for 3s · done 11:38 AM
+
+❯ Use the Bash tool to run: ls -la /tmp/tma1-e2e | wc -l
+
+  Listed 1 directory
+
+⏺ The /tmp/tma1-e2e directory listing has 3 lines (typically
+  the total line plus one or two entries).
+
+✻ Cooked for 3s · done 11:39 AM
+
+❯ Use the Bash tool to run exactly: touch
+  /tmp/tma1-e2e/probe.txt
+
+⏺ Creating probe.txt in /tmp/tma1-e2e
+  ⎿  $ touch /tmp/tma1-e2e/probe.txt
+
+────────────────────────────────────────────────────────────
+ Bash command
+
+   touch /tmp/tma1-e2e/probe.txt
+   Create probe.txt in /tmp/tma1-e2e
+
+ Do you want to proceed?
+ ❯ 1. Yes
+   2. Yes, and always allow access to /tmp/tma1-e2e from
+      this project
+   3. No
+
+ Esc to cancel · Tab to amend

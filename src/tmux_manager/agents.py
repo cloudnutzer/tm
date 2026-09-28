@@ -297,6 +297,7 @@ def normalize_screen(text: str) -> str:
 @dataclass
 class _Seen:
     digest: int
+    first_seen: float
     changed_at: float | None
     """When the pane text was last seen changing; None if never."""
     state: AgentState
@@ -313,16 +314,19 @@ class AgentTracker:
         screen = normalize_screen(screen)
         digest = hash(screen)
         seen = self._seen.get(pane.pane_id)
+        first_seen = seen.first_seen if seen else now
         changed_at = seen.changed_at if seen else None
         if seen is not None and seen.digest != digest:
             changed_at = now
         # window_activity covers every pane of a window, so it only speaks for
         # this pane when the window has no other.
-        # For "time since last change" it is still the best guess until this
-        # pane has been seen changing.
         single = pane.window_panes <= 1
-        if single or changed_at is None:
+        if single:
             last_change = max(changed_at or 0, pane.window_activity)
+        elif changed_at is None:
+            # Not seen changing yet: at the latest when we first looked, and
+            # at the latest when the window last had output.
+            last_change = min(first_seen, pane.window_activity)
         else:
             last_change = changed_at
         active = changed_at is not None and now - changed_at < self.grace_seconds
@@ -331,7 +335,7 @@ class AgentTracker:
         manifest = bundled_manifests().get(pane.agent or "")
         detection = detect(manifest, screen, pane.title) if manifest else Detection()
         state = resolve_state(detection, active, seen.state if seen else None)
-        self._seen[pane.pane_id] = _Seen(digest=digest, changed_at=changed_at, state=state)
+        self._seen[pane.pane_id] = _Seen(digest, first_seen, changed_at, state)
         return AgentStatus(pane, state, int(last_change), detection.rule)
 
     def retain(self, pane_ids: Iterable[str]) -> None:

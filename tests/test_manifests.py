@@ -1,5 +1,7 @@
 """The herdr manifest engine port: loading, regions, rule semantics, agent screens."""
 
+from pathlib import Path
+
 import pytest
 
 from tmux_manager import manifests
@@ -334,4 +336,25 @@ def test_agent_screens(
     agent: str, screen: str, title: str, state: str | None, rule: str | None
 ) -> None:
     detection = detect(bundled_manifests()[agent], screen, title)
+    assert (detection.state, detection.rule) == (state, rule)
+
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+@pytest.mark.parametrize(
+    ("fixture", "state", "rule"),
+    [
+        # captured live from Claude Code 2.1.283 in tmux 3.7c
+        ("claude-2.1.283-trust.txt", "blocked", "live_blocked_form"),
+        ("claude-2.1.283-bash-permission.txt", "blocked", "bash_permission_prompt"),
+        ("claude-2.1.283-idle.txt", "idle", "live_prompt_box"),
+        # while it streams an answer Claude shows no spinner: the screen looks
+        # idle and only the activity signal can tell (see test_agents)
+        ("claude-2.1.283-streaming.txt", "idle", "live_prompt_box"),
+    ],
+)
+def test_real_claude_screens(fixture: str, state: str, rule: str) -> None:
+    screen = (FIXTURES / fixture).read_text(encoding="utf-8")
+    detection = detect(bundled_manifests()["claude"], screen, "✳ Claude Code")
     assert (detection.state, detection.rule) == (state, rule)
