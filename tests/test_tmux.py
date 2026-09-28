@@ -4,7 +4,7 @@ from collections.abc import Callable
 import pytest
 
 from tmux_manager import tmux
-from tmux_manager.models import PostAction
+from tmux_manager.models import PostAction, TmuxPane
 
 FakeRun = Callable[[list[str]], subprocess.CompletedProcess[str]]
 
@@ -198,3 +198,29 @@ def test_list_panes_no_server_is_empty(monkeypatch: pytest.MonkeyPatch) -> None:
     fake, _ = fake_run(stderr="no server running on /tmp/tmux-501/default", returncode=1)
     monkeypatch.setattr(tmux, "_run", fake)
     assert tmux.list_panes() == []
+
+
+def test_capture_pane_by_id_argv(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake, calls = fake_run(stdout="text")
+    monkeypatch.setattr(tmux, "_run", fake)
+    assert tmux.capture_pane_by_id("%5") == "text"
+    tmux.capture_pane_by_id("%5", colors=True)
+    assert calls == [
+        ["-u", "capture-pane", "-p", "-t", "%5"],
+        ["-u", "capture-pane", "-ep", "-t", "%5"],
+    ]
+
+
+def test_select_pane_selects_window_then_pane(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake, calls = fake_run()
+    monkeypatch.setattr(tmux, "_run", fake)
+    tmux.select_pane("%5")
+    assert calls == [["select-window", "-t", "%5"], ["select-pane", "-t", "%5"]]
+
+
+def test_pane_action_carries_the_pane(monkeypatch: pytest.MonkeyPatch) -> None:
+    pane = TmuxPane("work", 2, "api", 1, "%5", 42, "zsh", "/tmp", 0, 2, "", "claude")
+    monkeypatch.delenv("TMUX", raising=False)
+    assert tmux.pane_action(pane) == PostAction(kind="attach", target="work", pane="%5")
+    monkeypatch.setenv("TMUX", "/tmp/tmux-1/default,123,0")
+    assert tmux.pane_action(pane) == PostAction(kind="switch", target="work", pane="%5")

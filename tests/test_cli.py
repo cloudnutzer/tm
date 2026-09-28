@@ -71,6 +71,16 @@ def test_main_switches_client_inside_tmux(
     assert cli_env == []
 
 
+def test_main_selects_the_pane_before_attaching(
+    cli_env: list[tuple[str, list[str]]], fake_tmux: FakeTmux, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    action = PostAction(kind="attach", target="beta", pane="%5")
+    monkeypatch.setattr(cli, "run_tui", lambda config: action)
+    cli.main([])
+    assert fake_tmux.calls == [("select-pane", "%5")]
+    assert cli_env == [("tmux", ["tmux", "attach-session", "-t", "=beta"])]
+
+
 def test_main_does_nothing_when_tui_quits(
     cli_env: list[tuple[str, list[str]]], monkeypatch: pytest.MonkeyPatch
 ) -> None:

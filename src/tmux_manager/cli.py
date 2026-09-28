@@ -33,6 +33,8 @@ keys:
   r               rename session
   D               detach all clients from session
   p               project sessionizer
+  a               agents: coding agents in all panes, blocked first;
+                  enter jumps to the agent's pane
   /               filter session list
   s               sort by name / last activity
   v               show / hide the preview
@@ -89,6 +91,11 @@ def run_tui(config: Config) -> PostAction | None:
 
 def perform(action: PostAction) -> None:
     """Attach or switch after the terminal has been restored."""
+    if action.pane is not None:
+        try:
+            tmux.select_pane(action.pane)
+        except tmux.TmuxError as error:
+            fail(str(error))
     if action.kind == "attach":
         # exec so tm leaves no extra process behind
         argv = tmux.base_argv() + ["attach-session", "-t", f"={action.target}"]

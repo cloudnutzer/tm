@@ -13,13 +13,17 @@ from textual.screen import Screen
 from textual.timer import Timer
 from textual.widgets import DataTable, Footer, Header, Input, Static
 
-from .. import tmux
+from .. import agents, tmux
+from ..agents import AgentStatus
 from ..config import Config, SortMode
 from ..models import TmuxSession
 from ..util import relative_time, short_path
+from .agents import AgentsScreen
 from .modals import ConfirmModal, HelpModal, NewSessionModal, RenameModal
 from .sessionizer import SessionizerScreen
-from .widgets import FilterInput
+from .widgets import FilterInput, tail_of_pane
+
+__all__ = ["SessionsScreen", "switch_hint", "tail_of_pane"]
 
 if TYPE_CHECKING:
     from ..app import TmuxManagerApp
@@ -32,7 +36,7 @@ CURRENT_MARKER = "▸"
 POPUP_BINDING_EXAMPLE = "bind S display-popup -E -w 80% -h 75% tm"
 
 Cell = str | Text
-Row = tuple[Cell, Cell, Cell, Cell, Cell]
+Row = tuple[Cell, Cell, Cell, Cell, Cell, Cell]
 
 HELP = [
     ("j / k, ↓ / ↑", "move the cursor"),
@@ -42,6 +46,7 @@ HELP = [
     ("r", "rename session"),
     ("D", "detach all clients from session"),
     ("p", "project sessionizer"),
+    ("a", "agents: coding agents in all panes, blocked first"),
     ("/", "filter sessions; Esc clears, Enter jumps to the match"),
     ("s", "sort by name / last activity"),
     ("v", "show / hide the preview"),
@@ -59,6 +64,7 @@ class SessionsScreen(Screen[None]):
         Binding("r", "rename_session", "rename"),
         Binding("D", "detach_clients", "detach"),
         Binding("p", "sessionizer", "projects"),
+        Binding("a", "agents", "agents"),
         Binding("/", "filter", "filter"),
         Binding("s", "toggle_sort", "sort"),
         Binding("v", "toggle_preview", "preview"),
@@ -70,6 +76,7 @@ class SessionsScreen(Screen[None]):
     def __init__(self) -> None:
         super().__init__()
         self._sessions: list[TmuxSession] = []
+        self._agents: list[AgentStatus] = []
         self._current: str | None = None
         self._inside = False
         self._popup_key: str | None = None
@@ -108,7 +115,7 @@ class SessionsScreen(Screen[None]):
         self._apply_preview_visibility()
         table = self.query_one(DataTable)
         table.cursor_type = "row"
-        table.add_columns("Name", "Windows", "Clients", "Activity", "Path")
+        table.add_columns("Name", "Windows", "Clients", "Activity", "Agents", "Path")
         table.focus()
         self._list_timer = self.set_interval(self.cfg.list_refresh_seconds, self.refresh_sessions)
         self._preview_timer = self.set_interval(
@@ -142,14 +149,16 @@ class SessionsScreen(Screen[None]):
     @work(exclusive=True, group="sessions")
     async def _load_sessions(self) -> None:
         check_popup = not self._popup_checked
+        tracker = cast("TmuxManagerApp", self.app).agent_tracker
 
-        def load() -> tuple[list[TmuxSession], str | None, str | None]:
+        def load() -> tuple[list[TmuxSession], list[AgentStatus], str | None, str | None]:
             sessions = tmux.list_sessions()
+            statuses = agents.collect(tracker) if sessions else []
             popup = tmux.popup_binding() if check_popup else self._popup_key
-            return sessions, tmux.current_session(), popup
+            return sessions, statuses, tmux.current_session(), popup
 
         try:
-            sessions, current, popup = await asyncio.to_thread(load)
+            sessions, statuses, current, popup = await asyncio.to_thread(load)
         except tmux.TmuxError as error:
             self._report_error(str(error))
             return
@@ -157,6 +166,7 @@ class SessionsScreen(Screen[None]):
             return
         self._last_error = None
         self._sessions = sessions
+        self._agents = statuses
         self._inside = tmux.inside_tmux()
         self._current = current
         self._popup_key = popup
@@ -198,6 +208,7 @@ class SessionsScreen(Screen[None]):
             str(session.windows),
             str(session.attached) if session.attached else "",
             relative_time(session.activity),
+            agents.rollup(s for s in self._agents if s.pane.session == session.name),
             short_path(session.current_path or session.path),
         )
 
@@ -391,6 +402,9 @@ class SessionsScreen(Screen[None]):
     def action_sessionizer(self) -> None:
         self.app.push_screen(SessionizerScreen())
 
+    def action_agents(self) -> None:
+        self.app.push_screen(AgentsScreen())
+
     def action_help(self) -> None:
         self.app.push_screen(HelpModal("Session list", HELP))
 
@@ -453,19 +467,3 @@ def switch_hint(*, inside: bool, popup_key: str | None) -> str:
         "Inside a session, run tm again to switch — no need to detach. "
         f"For a popup key, add to ~/.tmux.conf: {POPUP_BINDING_EXAMPLE}"
     )
-
-
-def tail_of_pane(content: str, height: int) -> Text:
-    """The last ``height`` non-blank lines of a captured pane, colors intact.
-
-    capture-pane returns the full pane height including the blank rows below
-    the prompt; showing the top would hide the most recent output.
-    """
-    lines: list[Text] = list(Text.from_ansi(content).split("\n"))
-    for line in lines:
-        line.rstrip()
-    while lines and not lines[-1].plain.strip():
-        lines.pop()
-    if height > 0:
-        lines = lines[-height:]
-    return Text("\n").join(lines)
